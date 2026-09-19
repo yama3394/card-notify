@@ -99,6 +99,35 @@ def _restore_late_arrivals(items: list[dict]) -> None:
     _state.update(_restore)
 
 
+_PENDING_NOTICE_KEYS = ("late_arrivals", "cancellations")
+
+
+def _pop_pending_notices() -> dict[str, list[dict]]:
+    """日次通知に載せる保留分（追加登録・取消）をまとめて読み取り＋クリアする（1トランザクション）。
+
+    _pop_late_arrivals と同じ理由で読み取りとクリアを分けない。送信に失敗したら
+    _restore_pending_notices で書き戻す。
+    """
+    captured: dict[str, list[dict]] = {}
+
+    def _pop(s: dict) -> None:
+        for key in _PENDING_NOTICE_KEYS:
+            captured[key] = s.get(key) or []
+            s[key] = []
+
+    _state.update(_pop)
+    return captured
+
+
+def _restore_pending_notices(notices: dict[str, list[dict]]) -> None:
+    def _restore(s: dict) -> None:
+        for key in _PENDING_NOTICE_KEYS:
+            if notices.get(key):
+                s.setdefault(key, []).extend(notices[key])
+
+    _state.update(_restore)
+
+
 def _notify_fetch_error_once(notifier, message: str) -> None:
     """Gmail 取得失敗のエラーLINE通知を1日1回に抑制する。
 
@@ -150,17 +179,16 @@ def run() -> bool:
         logger.info("本日の日次通知は送信済みのためスキップ")
     else:
         logger.info("日次通知送信")
-        # メール遅延・手入力の過去日付登録（gmail_fetcher / manual_entry が積む）を
-        # 今回の通知に載せる
-        late_arrivals = _pop_late_arrivals()
+        # メール遅延・手入力の過去日付登録（gmail_fetcher / manual_entry が積む）と
+        # LINE の「取消」で消した通知済みの日の取引（manual_entry が積む）を今回の通知に載せる
+        notices = _pop_pending_notices()
         try:
-            notifier.send_daily_report(data, late_arrivals)
+            notifier.send_daily_report(data, notices["late_arrivals"], notices["cancellations"])
             _mark_notified()
         except Exception as e:
             logger.error(f"日次通知失敗: {e}")
             notifier.notify_error(f"日次通知失敗: {e}")
-            if late_arrivals:
-                _restore_late_arrivals(late_arrivals)
+            _restore_pending_notices(notices)
             ok = False
 
     today = datetime.now(JST).date()

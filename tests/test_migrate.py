@@ -22,7 +22,7 @@ def test_fresh_install_runs_to_latest(monkeypatch, tmp_path):
     assert migrate.current_version() == 0
 
     applied = migrate.run()
-    assert applied == ["v1: add_currency"]
+    assert applied == ["v1: add_currency", "v2: add_transaction_numbers"]
     assert migrate.current_version() == migrate.latest_version()
 
 
@@ -59,7 +59,7 @@ def test_corrupt_version_file_treated_as_zero(monkeypatch, tmp_path):
     assert migrate.current_version() == 0
 
     applied = migrate.run()
-    assert applied == ["v1: add_currency"]
+    assert applied == ["v1: add_currency", "v2: add_transaction_numbers"]
     assert migrate.current_version() == migrate.latest_version()
 
 

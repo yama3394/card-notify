@@ -499,6 +499,78 @@ class TestCsvExport:
         assert "10950,KRW" in text
 
 
+class TestCsvAndPagesShowIds:
+    def test_csv_has_id_column(self, configured_app):
+        storage.update_history(lambda d: d["transactions"].extend([
+            {"id": "u1", "date": "2026-07-01", "amount": 800, "type": "cash", "store": "セブン"},
+            {"id": "m1", "date": "2026-07-02", "amount": 1200, "type": "smcc", "store": None},
+        ]))
+        client = configured_app.test_client()
+        _login_session(client)
+        lines = client.get("/export/csv?year=2026&month=7").get_data(as_text=True).replace("\r", "").splitlines()
+        assert lines[0].lstrip("\ufeff") == "ID,日付,種別,金額,通貨,店舗名"
+        assert lines[1].startswith("1,2026-07-01,")
+        assert lines[2].startswith("2,2026-07-02,")
+
+    @pytest.mark.parametrize("url, badge", [
+        ("/cash", "#1<"),                       # 現金だけ
+        ("/transactions?month=2026-07", "#2<"),  # 全種別
+        ("/errors", "#2<"),                     # 店舗名未取得のカード取引だけ
+    ])
+    def test_pages_show_id(self, configured_app, url, badge):
+        storage.update_history(lambda d: d["transactions"].extend([
+            {"id": "u1", "date": "2026-07-01", "amount": 800, "type": "cash", "store": "セブン"},
+            {"id": "m1", "date": "2026-07-02", "amount": 1200, "type": "smcc", "store": None},
+        ]))
+        client = configured_app.test_client()
+        _login_session(client)
+        assert badge in client.get(url).get_data(as_text=True)
+
+
+class TestWebhookReply:
+    """webhook の返信（取消の経路・エラー時の返信・push へのフォールバック）。"""
+    SECRET = "test-line-secret"  # configured_app の LINE_CHANNEL_SECRET
+
+    @pytest.fixture
+    def sent(self, configured_app, monkeypatch):
+        rec = {"reply": [], "push": []}
+        monkeypatch.setattr(app_module, "_line_reply", lambda token, text: rec["reply"].append(text))
+        monkeypatch.setattr(notifier, "push", lambda text: rec["push"].append(text))
+        return rec
+
+    def _post(self, configured_app, text: str, redelivery: bool = False):
+        body = json.loads(_webhook_body("U-owner", text))
+        if redelivery:
+            body["events"][0]["deliveryContext"] = {"isRedelivery": True}
+        raw = json.dumps(body).encode("utf-8")
+        return _post_webhook(configured_app.test_client(), raw, _sign(self.SECRET, raw))
+
+    def test_cancel_is_routed_from_line(self, configured_app, sent):
+        assert self._post(configured_app, "800 セブン").status_code == 200
+        assert self._post(configured_app, "取消").status_code == 200
+        assert "　ID: #1" in sent["reply"][0]
+        assert "取り消しました" in sent["reply"][1]
+        assert storage.load_history()["transactions"] == []
+
+    def test_exception_is_answered_not_swallowed(self, configured_app, sent, monkeypatch):
+        # 500 を返すと LINE の再配達が重複判定で捨てられ、本人に何も返らない
+        def _boom(text):
+            raise RuntimeError("boom")
+        monkeypatch.setattr(manual_entry, "process_line", _boom)
+        assert self._post(configured_app, "取消").status_code == 200
+        assert sent["reply"][0].startswith("⚠️ 処理中にエラーが発生しました")
+
+    def test_reply_failure_falls_back_to_push(self, configured_app, sent, monkeypatch):
+        monkeypatch.setattr(app_module, "_line_reply", lambda token, text: False)
+        self._post(configured_app, "800")
+        assert "登録しました" in sent["push"][0]
+
+    def test_redelivery_uses_push(self, configured_app, sent):
+        # 再配達イベントの replyToken は失効している可能性が高い
+        self._post(configured_app, "800", redelivery=True)
+        assert sent["reply"] == []
+        assert "登録しました" in sent["push"][0]
+
 # ── 7. 設定変更の再認証 ────────────────────────────────────────────────────────
 
 class TestSettingsReauth:
@@ -593,9 +665,11 @@ class TestErrorsSkipped:
 
         data = storage.load_history()
         assert data["skipped"] == []
+        tx = data["transactions"][0]
+        assert tx.pop("created_at")  # 手動登録も他の登録経路と同じく連番・登録時刻が付く
         assert data["transactions"] == [{
             "id": "m1", "date": "2026-07-01", "amount": 1500,
-            "type": "smcc", "store": "セブン", "currency": "JPY",
+            "type": "smcc", "store": "セブン", "currency": "JPY", "no": 1,
         }]
 
     def test_skipped_register_without_store_is_none(self, configured_app):

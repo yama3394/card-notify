@@ -28,7 +28,7 @@ def calls(tmp_path, monkeypatch):
     monkeypatch.setattr(gmail_fetcher, "fetch_all", lambda: 0)
     monkeypatch.setattr(analyzer, "analyze", lambda: {"dummy": True})
     monkeypatch.setattr(notifier, "send_daily_report",
-                        lambda data, late_arrivals=None: rec["daily"].append(data))
+                        lambda data, late_arrivals=None, cancellations=None: rec["daily"].append(data))
     monkeypatch.setattr(notifier, "notify_error", lambda msg: rec["errors"].append(msg))
     monkeypatch.setattr(reports, "send_monthly_report", lambda y, m: rec["monthly"].append((y, m)))
     monkeypatch.setattr(reports, "send_weekly_report", lambda: rec["weekly"].append(True))

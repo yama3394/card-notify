@@ -10,7 +10,7 @@
 {% for t in transactions %}
 <div id="card-{{ loop.index }}" class="card">
   <div style="display:flex;justify-content:space-between;align-items:baseline;margin-bottom:8px">
-    <span style="font-size:13px;color:#666">{{ t.date }} / {{ t.type.upper() }}</span>
+    <span style="font-size:13px;color:#666">{% if t.no %}<span style="margin-right:6px">#{{ t.no }}</span>{% endif %}{{ t.date }} / {{ t.type.upper() }}</span>
     <span style="font-size:20px;font-weight:bold">{% if t.currency and t.currency != 'JPY' %}{{ "{:,}".format(t.amount) }} {{ t.currency }}{% else %}¥{{ "{:,}".format(t.amount) }}{% endif %}</span>
   </div>
 

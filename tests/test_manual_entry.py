@@ -5,6 +5,7 @@ import pytest
 import config
 import manual_entry
 import state
+import storage
 from manual_entry import _parse_date, process
 
 FIXED_TODAY = date(2026, 5, 29)  # 金曜日
@@ -23,7 +24,9 @@ def _patch_storage(monkeypatch):
     store = {"transactions": [], "skipped_ids": []}
     monkeypatch.setattr(manual_entry, "load_history", lambda: store)
     # 更新系は update_history(mutator) に統一。共有の store dict へ適用するスタブ。
-    monkeypatch.setattr(manual_entry, "update_history", lambda mutator: mutator(store))
+    # 連番の付与も本物と同じく apply_update を通す。
+    monkeypatch.setattr(manual_entry, "update_history",
+                        lambda mutator: storage.apply_update(store, mutator))
     monkeypatch.setattr(manual_entry, "today_jst", lambda: FIXED_TODAY)
     return store
 
@@ -126,7 +129,7 @@ class TestLateArrival:
 
         late = state.load().get("late_arrivals")
         assert late == [
-            {"date": "2026-05-28", "amount": 1400, "currency": "JPY", "type": "cash", "store": "スーパー"}
+            {"no": 1, "date": "2026-05-28", "amount": 1400, "currency": "JPY", "type": "cash", "store": "スーパー"}
         ]
         # 過去日付登録では「本日現金合計」ではなくその日付のラベルにする
         assert "本日現金合計" not in reply

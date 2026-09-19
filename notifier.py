@@ -96,7 +96,8 @@ def _fmt_amount(amount: int | float, currency: str) -> str:
     return f"{_fmt_foreign(amount)} {currency}"
 
 
-def _build_daily_text(analysis: dict, late_arrivals: list[dict] | None = None) -> str:
+def _build_daily_text(analysis: dict, late_arrivals: list[dict] | None = None,
+                      cancellations: list[dict] | None = None) -> str:
     d = analysis["date"]
     yday = analysis["yesterday"]
     diff = analysis["diff"]
@@ -172,8 +173,20 @@ def _build_daily_text(analysis: dict, late_arrivals: list[dict] | None = None) -
         if has_prev_week_item and analysis.get("prev_week_total") is not None:
             lines.append(f"先週計（追加登録反映）  ¥{analysis['prev_week_total']:,}")
 
+    # LINE の「取消」で消した、既に通知済みの日の取引。案内しないと週計・月計が
+    # 黙って減り、「昨日と合計が違う」理由が本人に分からない。
+    if cancellations:
+        lines.append("")
+        lines.append("取消反映")
+        for t in cancellations:
+            d2 = (t.get("date") or "").replace("-", "/")
+            amount = _fmt_amount(t.get("amount", 0), t.get("currency") or "JPY")
+            store = sanitize(t.get("store")) or "（店舗名なし）"
+            lines.append(f"{d2}  -{amount}  {store}")
+
     return "\n".join(lines)
 
 
-def send_daily_report(analysis: dict, late_arrivals: list[dict] | None = None) -> None:
-    push(_build_daily_text(analysis, late_arrivals))
+def send_daily_report(analysis: dict, late_arrivals: list[dict] | None = None,
+                      cancellations: list[dict] | None = None) -> None:
+    push(_build_daily_text(analysis, late_arrivals, cancellations))
