@@ -41,6 +41,7 @@ tests/test_auto_update.py
 tests/test_daily_extras.py
 tests/test_foreign.py
 tests/test_gmail_fetcher.py
+tests/test_ids_and_cancel.py
 tests/test_late_arrivals.py
 tests/test_main_run.py
 tests/test_manual_entry.py
