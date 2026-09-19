@@ -245,10 +245,47 @@ def webhook():
             logger.info("再配達イベントをスキップ: %s", event.get("webhookEventId"))
             continue
 
-        reply = manual_entry.process(msg.get("text", ""))
-        _line_reply(event.get("replyToken"), reply)
+        text = msg.get("text", "")
+        redelivered = bool((event.get("deliveryContext") or {}).get("isRedelivery"))
+        try:
+            reply = manual_entry.process_line(text)
+        except Exception:
+            # ここで例外を外に出すと 500 → LINE が再配達 → 上の重複判定でスキップ
+            # → 何も起きない（メッセージが黙って消える）。必ず本人にエラーを返し、
+            # 200 で受理する。
+            logger.exception("LINE メッセージの処理に失敗: %r", text)
+            reply = (
+                "⚠️ 処理中にエラーが発生しました。\n"
+                "登録・取消されたかどうかは WebUI の現金履歴で確認してください"
+                "（確認せずに再送すると二重登録になる恐れがあります）"
+            )
+        _respond(event.get("replyToken"), reply, redelivered)
 
     return "OK", 200
+
+
+def _respond(reply_token: str | None, text: str, redelivered: bool = False) -> None:
+    """本人へ返す。
+
+    再配達（deliveryContext.isRedelivery）は元イベントの replyToken が失効して
+    いる可能性が高いので最初から push を使う。通常配達でも reply が明示的に
+    失敗したら push にフォールバックする（返信が届かないと本人が再送して
+    二重登録しかねない）。
+    """
+    if redelivered or not reply_token:
+        _push_to_owner(text)
+        return
+    # テストでは _line_reply を None を返す関数に差し替えるため、明示的な False のみ
+    # フォールバック対象にする。
+    if _line_reply(reply_token, text) is False:
+        _push_to_owner(text)
+
+
+def _push_to_owner(text: str) -> None:
+    try:
+        notifier.push(text)
+    except Exception as e:
+        logger.error(f"LINE push（返信フォールバック）失敗: {e}")
 
 
 def _save_user_id(user_id: str) -> None:
@@ -275,9 +312,10 @@ def _save_user_id(user_id: str) -> None:
     logger.info(f"LINE_USER_ID を登録しました: {user_id}")
 
 
-def _line_reply(reply_token: str, text: str) -> None:
+def _line_reply(reply_token: str, text: str) -> bool:
+    """reply API で返す。成功なら True、失敗なら False（呼び出し側が push へ切り替える）。"""
     if not reply_token:
-        return
+        return False
     try:
         requests.post(
             "https://api.line.me/v2/bot/message/reply",
@@ -288,8 +326,10 @@ def _line_reply(reply_token: str, text: str) -> None:
             json={"replyToken": reply_token, "messages": [{"type": "text", "text": text}]},
             timeout=10,
         ).raise_for_status()
+        return True
     except Exception as e:
-        logger.error(f"LINE返信失敗: {e}")
+        logger.error(f"LINE返信失敗（push へフォールバック）: {e}")
+        return False
 
 
 # ── Auth ───────────────────────────────────────────────────────────────────────
@@ -887,9 +927,10 @@ def export_csv():
     output = io.StringIO()
     writer = csv.writer(output)
     # 外貨決済（KRW等）が円と無区別に合算されないよう、通貨列を分けて出力する
-    writer.writerow(["日付", "種別", "金額", "通貨", "店舗名"])
+    writer.writerow(["ID", "日付", "種別", "金額", "通貨", "店舗名"])
     for t in txs:
         writer.writerow([
+            t.get("no", ""),
             t.get("date", ""),
             labels.get(t.get("type", ""), t.get("type", "")),
             t.get("amount", 0),

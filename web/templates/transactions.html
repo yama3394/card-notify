@@ -24,7 +24,7 @@
 <div id="tx-{{ loop.index }}" class="card">
   <div style="display:flex;justify-content:space-between;align-items:baseline;margin-bottom:8px">
     <span style="font-size:13px;color:#666">
-      {{ t.date }}
+      {% if t.no %}<span style="margin-right:6px">#{{ t.no }}</span>{% endif %}{{ t.date }}
       <span style="background:#eee;border-radius:3px;padding:1px 6px;margin-left:4px;font-size:11px">{{ type_label }}</span>
     </span>
     <span style="font-size:20px;font-weight:bold">{% if t.currency and t.currency != 'JPY' %}{{ "{:,}".format(t.amount) }} {{ t.currency }}{% else %}¥{{ "{:,}".format(t.amount) }}{% endif %}</span>

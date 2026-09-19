@@ -49,9 +49,20 @@ def m1_add_currency() -> None:
     storage.update_history(mutator)
 
 
+def m2_add_transaction_numbers() -> None:
+    """全 transaction に連番 ID（"no"）を登録順で振る（冪等）。
+
+    採番そのものは storage.update_history が書き込みのたびに行う（"no" の無い
+    取引に振る）ので、ここでは空の更新を1回走らせるだけ。更新直後に誰も登録
+    しなくても、WebUI や CSV に ID が出るようにするために行う。
+    """
+    storage.update_history(lambda data: None)
+
+
 # (version:int, name:str, func:callable) を昇順で登録する。
 MIGRATIONS = [
     (1, "add_currency", m1_add_currency),
+    (2, "add_transaction_numbers", m2_add_transaction_numbers),
 ]
 
 

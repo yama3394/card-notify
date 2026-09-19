@@ -10,7 +10,7 @@
 {% for t in transactions %}
 <div id="cash-{{ loop.index }}" class="card">
   <div style="display:flex;justify-content:space-between;align-items:baseline;margin-bottom:8px">
-    <span style="font-size:13px;color:#666">{{ t.date }}</span>
+    <span style="font-size:13px;color:#666">{% if t.no %}<span style="margin-right:6px">#{{ t.no }}</span>{% endif %}{{ t.date }}</span>
     <span style="font-size:20px;font-weight:bold">¥{{ "{:,}".format(t.amount) }}</span>
   </div>
   {% if t.store %}<p class="store-name">{{ t.store }}</p>{% endif %}
