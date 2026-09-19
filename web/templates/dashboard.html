@@ -1,0 +1,71 @@
+{% extends "base.html" %}
+{% block content %}
+{% if data %}
+{% set d = data.yesterday %}
+{% set diff = data.diff %}
+<div class="card">
+  <h2>{{ data.date.month }}/{{ data.date.day }} の使用額</h2>
+  <p class="total">¥{{ "{:,}".format(d.total) }}</p>
+  <table>
+    {% for k in type_keys %}
+    <tr><th>{{ type_labels[k] }}</th><td class="num">¥{{ "{:,}".format(d.by_type.get(k, 0)) }}</td></tr>
+    {% endfor %}
+  </table>
+  {% if data.foreign %}
+  <table style="margin-top:8px">
+    {% for cur, amt in data.foreign.items() %}
+    <tr><th>{{ cur }}</th><td class="num">{{ "{:,}".format(amt) }} {{ cur }}</td></tr>
+    {% endfor %}
+  </table>
+  {% endif %}
+  <form hx-post="/resend" hx-disabled-elt="find button" hx-target="#resend-result" hx-swap="innerHTML" style="margin-top:12px">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    <button type="submit">LINEに再送信</button>
+  </form>
+  <div id="resend-result" class="msg"></div>
+</div>
+
+<div class="card">
+  <h2>比較・累計</h2>
+  <table>
+    <tr><th>先週同曜日</th><td class="num">¥{{ "{:,}".format(data.last_week_same_day) }}</td></tr>
+    <tr>
+      <th>差分</th>
+      <td class="num {% if diff.amount < 0 %}neg{% elif diff.amount > 0 %}pos{% endif %}">
+        {% if diff.rate is not none %}
+          {{ '+' if diff.amount >= 0 else '' }}¥{{ "{:,}".format(diff.amount) }}
+          ({{ '+' if diff.rate >= 0 else '' }}{{ "%.0f"|format(diff.rate) }}%)
+        {% else %}―{% endif %}
+      </td>
+    </tr>
+    <tr><th>今週累計</th><td class="num">¥{{ "{:,}".format(data.week_total) }}</td></tr>
+    <tr><th>今月累計</th><td class="num">¥{{ "{:,}".format(data.month_total) }}</td></tr>
+  </table>
+</div>
+{% else %}
+<div class="card"><p class="sub">データがありません</p></div>
+{% endif %}
+
+<div class="card">
+  <h2>現金を手動登録</h2>
+  <form hx-post="/entry" hx-disabled-elt="find button" hx-target="#entry-result" hx-swap="innerHTML">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    <table style="margin-bottom:10px">
+      <tr>
+        <th style="width:80px">金額</th>
+        <td><input type="number" name="amount" placeholder="800" required min="1"></td>
+      </tr>
+      <tr>
+        <th>店舗名</th>
+        <td><input type="text" name="store" placeholder="セブンイレブン（省略可）"></td>
+      </tr>
+      <tr>
+        <th>日付</th>
+        <td><input type="text" name="date" placeholder="昨日 / 1/10（省略可）"></td>
+      </tr>
+    </table>
+    <button type="submit">登録</button>
+  </form>
+  <div id="entry-result" class="msg"></div>
+</div>
+{% endblock %}

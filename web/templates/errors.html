@@ -1,0 +1,91 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="card">
+  <h2>エラー一覧（店舗名未取得）</h2>
+  {% if not transactions %}
+  <p class="sub">店舗名未取得の取引はありません</p>
+  {% endif %}
+</div>
+
+{% for t in transactions %}
+<div id="card-{{ loop.index }}" class="card">
+  <div style="display:flex;justify-content:space-between;align-items:baseline;margin-bottom:8px">
+    <span style="font-size:13px;color:#666">{{ t.date }} / {{ t.type.upper() }}</span>
+    <span style="font-size:20px;font-weight:bold">{% if t.currency and t.currency != 'JPY' %}{{ "{:,}".format(t.amount) }} {{ t.currency }}{% else %}¥{{ "{:,}".format(t.amount) }}{% endif %}</span>
+  </div>
+
+  {% if t.raw_text %}
+  <details style="margin-bottom:10px">
+    <summary style="cursor:pointer;font-size:13px;color:#444">メール本文を見る</summary>
+    <pre style="margin-top:8px;font-size:11px;background:#f8f8f8;padding:8px;border-radius:4px;overflow-x:auto;white-space:pre-wrap;word-break:break-all;max-height:300px;overflow-y:auto">{{ t.raw_text }}</pre>
+  </details>
+  {% else %}
+  <p class="sub" style="margin-bottom:8px;font-size:12px">（メール本文なし・旧データ）</p>
+  {% endif %}
+
+  <form hx-post="/errors/fix" hx-disabled-elt="find button" hx-target="#result-{{ loop.index }}" hx-swap="innerHTML"
+        style="display:flex;gap:8px;align-items:center;margin-bottom:6px">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    <input type="hidden" name="id" value="{{ t.id }}">
+    <input type="text" name="store" placeholder="店舗名を入力して確定" style="flex:1">
+    <button type="submit" style="white-space:nowrap">確定</button>
+  </form>
+
+  <form hx-post="/errors/delete" hx-disabled-elt="find button" hx-target="#card-{{ loop.index }}" hx-swap="outerHTML"
+        hx-confirm="この取引を削除しますか？">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    <input type="hidden" name="id" value="{{ t.id }}">
+    <button type="submit" class="btn-del">削除</button>
+  </form>
+
+  <div id="result-{{ loop.index }}" style="margin-top:6px;font-size:13px"></div>
+</div>
+{% endfor %}
+
+<div class="card">
+  <h2>金額を抽出できなかったメール</h2>
+  {% if not skipped %}
+  <p class="sub">該当するメールはありません</p>
+  {% endif %}
+</div>
+
+{% for s in skipped %}
+<div id="skip-{{ loop.index }}" class="card">
+  <div style="display:flex;justify-content:space-between;align-items:baseline;margin-bottom:8px">
+    <span style="font-size:13px;color:#666">{{ s.date }} / {{ type_labels.get(s.type, s.type) }}</span>
+  </div>
+  <p class="store-name">{{ s.subject }}</p>
+
+  <form hx-post="/errors/skipped/register" hx-disabled-elt="find button"
+        hx-target="#result-skip-{{ loop.index }}" hx-swap="innerHTML" style="margin-bottom:8px">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    <input type="hidden" name="id" value="{{ s.id }}">
+    <input type="hidden" name="type" value="{{ s.type }}">
+    <table style="margin-bottom:8px">
+      <tr>
+        <th style="width:70px">金額</th>
+        <td><input type="number" name="amount" required min="1"></td>
+      </tr>
+      <tr>
+        <th>店舗名</th>
+        <td><input type="text" name="store" placeholder="任意"></td>
+      </tr>
+      <tr>
+        <th>日付</th>
+        <td><input type="date" name="date" value="{{ s.date }}" required></td>
+      </tr>
+    </table>
+    <button type="submit">手動登録</button>
+  </form>
+
+  <form hx-post="/errors/skipped/dismiss" hx-disabled-elt="find button"
+        hx-target="#skip-{{ loop.index }}" hx-swap="outerHTML" hx-confirm="このメールを無視しますか？">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    <input type="hidden" name="id" value="{{ s.id }}">
+    <button type="submit" class="btn-del">無視</button>
+  </form>
+
+  <div id="result-skip-{{ loop.index }}" style="margin-top:6px;font-size:13px"></div>
+</div>
+{% endfor %}
+{% endblock %}

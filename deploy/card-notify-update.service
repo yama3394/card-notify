@@ -1,0 +1,28 @@
+# /etc/systemd/system/card-notify-update.service
+# 自動アップデートを一度だけ実行する oneshot ユニット（card-notify-update.timer から起動）。
+# auto_update.py は AUTO_UPDATE=true のときだけ実際に更新する（既定 off なら空振り）。
+#
+# 【重要】auto_update.py は更新適用後にサービスを再起動する。非 root の専用ユーザーで
+# 動くため、`sudo -n systemctl restart card-notify.service` を使う。install.sh が
+# /etc/sudoers.d/card-notify にこのコマンドだけの NOPASSWD 許可を設置する:
+#   REPLACE_WITH_SERVICE_USER ALL=(root) NOPASSWD: /usr/bin/systemctl restart card-notify.service
+# （systemctl のパスは install.sh が実環境から解決する。手動設置する場合は
+#  visudo -cf で構文検証すること）
+# 代替として、この update ユニットだけ User/Group 行を削除して root で実行してもよい
+# （restart は無条件で可能。その場合、書き込み先 INSTALL_DIR/DATA_DIR の所有権に注意）。
+[Unit]
+Description=card-notify 自動アップデート（R2 フィードを確認して更新）
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=REPLACE_WITH_SERVICE_USER
+Group=REPLACE_WITH_SERVICE_USER
+WorkingDirectory=/opt/card-notify
+# 本体サービス（card-notify.service）と環境を揃える
+Environment=CARD_NOTIFY_ENV_FILE=/var/lib/card-notify/card-notify.env
+Environment=CARD_NOTIFY_DATA_DIR=/var/lib/card-notify
+Environment=PYTHONUNBUFFERED=1
+Environment=TZ=Asia/Tokyo
+ExecStart=/opt/card-notify/.venv/bin/python /opt/card-notify/auto_update.py

@@ -1,0 +1,69 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>家計管理</title>
+<link rel="icon" type="image/x-icon" href="/static/favicon.ico">
+<link rel="apple-touch-icon" href="/static/icon.png">
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:system-ui,-apple-system,sans-serif;font-size:15px;background:#f5f5f5;color:#222}
+nav{background:#333;padding:10px 16px;display:flex;gap:20px;overflow-x:auto;white-space:nowrap;-webkit-overflow-scrolling:touch}
+nav a{color:#eee;text-decoration:none;font-size:14px;padding:6px 2px;display:inline-block}
+nav a:hover{color:#fff}
+/* 横に長い表は画面幅を超えても表全体を崩さず、横スクロールで見せる */
+.table-scroll{overflow-x:auto;-webkit-overflow-scrolling:touch;margin:0 -2px}
+.table-scroll table{margin:0}
+.btn-del{background:#c00;font-size:12px;padding:8px 14px}
+.wrap{max-width:640px;margin:24px auto;padding:0 12px}
+.card{background:#fff;border-radius:6px;padding:16px;margin-bottom:16px;box-shadow:0 1px 3px rgba(0,0,0,.1)}
+h2{font-size:16px;margin-bottom:12px;color:#333}
+table{width:100%;border-collapse:collapse;font-size:14px}
+td,th{padding:6px 8px;text-align:left;border-bottom:1px solid #eee;overflow-wrap:break-word}
+.store-name{font-size:14px;margin-bottom:10px;overflow-wrap:break-word}
+th{color:#666;font-weight:normal}
+.num{text-align:right;font-variant-numeric:tabular-nums}
+.total{font-size:24px;font-weight:bold;margin:8px 0}
+.sub{color:#666;font-size:13px}
+.pos{color:#c00}.neg{color:#060}
+/* font-size:16px 以上にしておくと iOS Safari の入力フォーカス時ズームを防げる */
+input,select,button{font-family:inherit;font-size:16px;max-width:100%}
+input[type=text],input[type=password],input[type=number]{
+  border:1px solid #ccc;border-radius:4px;padding:8px 10px;width:100%}
+button{background:#333;color:#fff;border:none;border-radius:4px;
+  padding:8px 16px;cursor:pointer;-webkit-tap-highlight-color:transparent;
+  touch-action:manipulation}
+button:hover{background:#555}
+.msg{margin-top:10px;font-size:14px}
+@media (max-width:480px){
+  .wrap{margin:16px auto;padding:0 10px}
+  .card{padding:14px 12px}
+  nav{gap:14px}
+  table{font-size:13px}
+  td,th{padding:6px 5px}
+  .total{font-size:22px}
+}
+</style>
+</head>
+<body>
+{% if session.get('logged_in') %}
+<nav>
+  <a href="/dashboard">日次</a>
+  <a href="/weekly">週次</a>
+  <a href="/monthly">月次</a>
+  <a href="/transactions">全履歴</a>
+  <a href="/cash">現金</a>
+  <a href="/errors">エラー</a>
+  <a href="/settings">設定</a>
+  <a href="/logout">ログアウト</a>
+</nav>
+{% endif %}
+<div class="wrap">
+{% block content %}{% endblock %}
+</div>
+<script src="/static/chart.min.js"></script>
+<script src="/static/htmx.min.js"></script>
+{% block scripts %}{% endblock %}
+</body>
+</html>

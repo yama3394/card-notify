@@ -1,0 +1,49 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="card">
+  <h2>現金履歴</h2>
+  {% if not transactions %}
+  <p class="sub">現金取引はありません</p>
+  {% endif %}
+</div>
+
+{% for t in transactions %}
+<div id="cash-{{ loop.index }}" class="card">
+  <div style="display:flex;justify-content:space-between;align-items:baseline;margin-bottom:8px">
+    <span style="font-size:13px;color:#666">{{ t.date }}</span>
+    <span style="font-size:20px;font-weight:bold">¥{{ "{:,}".format(t.amount) }}</span>
+  </div>
+  {% if t.store %}<p class="store-name">{{ t.store }}</p>{% endif %}
+
+  <form hx-post="/cash/edit" hx-disabled-elt="find button" hx-target="#result-{{ loop.index }}" hx-swap="innerHTML"
+        style="margin-bottom:8px">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    <input type="hidden" name="id" value="{{ t.id }}">
+    <table style="margin-bottom:8px">
+      <tr>
+        <th style="width:70px">金額</th>
+        <td><input type="number" name="amount" value="{{ t.amount }}" required min="1"></td>
+      </tr>
+      <tr>
+        <th>店舗名</th>
+        <td><input type="text" name="store" value="{{ t.store or '' }}"></td>
+      </tr>
+      <tr>
+        <th>日付</th>
+        <td><input type="date" name="date" value="{{ t.date }}" required></td>
+      </tr>
+    </table>
+    <button type="submit">更新</button>
+  </form>
+
+  <form hx-post="/cash/delete" hx-disabled-elt="find button" hx-target="#cash-{{ loop.index }}" hx-swap="outerHTML"
+        hx-confirm="この取引を削除しますか？">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    <input type="hidden" name="id" value="{{ t.id }}">
+    <button type="submit" class="btn-del">削除</button>
+  </form>
+
+  <div id="result-{{ loop.index }}" style="margin-top:6px;font-size:13px"></div>
+</div>
+{% endfor %}
+{% endblock %}

@@ -1,0 +1,35 @@
+{% if report %}
+<p class="total">¥{{ "{:,}".format(report.total) }}</p>
+<table style="margin-bottom:12px">
+  {% for k in type_keys %}
+  <tr><th>{{ type_labels[k] }}</th><td class="num">¥{{ "{:,}".format(report.by_type.get(k, 0)) }}</td></tr>
+  {% endfor %}
+</table>
+
+<h2>店舗別 TOP10</h2>
+<table style="margin-bottom:12px">
+  {% for store, amount in report.top_stores %}
+  <tr><td>{{ store }}</td><td class="num">¥{{ "{:,}".format(amount) }}</td></tr>
+  {% else %}
+  <tr><td colspan="2" class="sub">データなし</td></tr>
+  {% endfor %}
+</table>
+
+<h2>先月比</h2>
+<table>
+  <tr><th>先月</th><td class="num">¥{{ "{:,}".format(report.prev_total) }}</td></tr>
+  <tr><th>今月</th><td class="num">¥{{ "{:,}".format(report.total) }}</td></tr>
+  {% set diff = report.total - report.prev_total %}
+  <tr>
+    <th>差分</th>
+    <td class="num {% if diff < 0 %}neg{% elif diff > 0 %}pos{% endif %}">
+      {% if report.prev_total %}
+        {{ '+' if diff >= 0 else '' }}¥{{ "{:,}".format(diff) }}
+        ({{ '+' if diff >= 0 else '' }}{{ "%.1f"|format(diff / report.prev_total * 100) }}%)
+      {% else %}―{% endif %}
+    </td>
+  </tr>
+</table>
+{% else %}
+<p class="sub">データがありません</p>
+{% endif %}

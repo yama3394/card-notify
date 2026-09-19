@@ -1,0 +1,21 @@
+# ── Secrets (NEVER commit) ────────────────────────────────
+.env
+*.env
+credentials.json
+token.json
+
+# ── Per-user runtime data ─────────────────────────────────
+data/
+*.log
+
+# ── Build / update artifacts ──────────────────────────────
+dist/
+.update-backup/
+
+# ── Python ────────────────────────────────────────────────
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.venv/
+venv/
+*.egg-info/

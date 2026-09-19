@@ -1,0 +1,84 @@
+{% extends "base.html" %}
+{% block content %}
+{% set r = report %}
+{% set weekdays = ['月','火','水','木','金','土','日'] %}
+
+<div class="card">
+  <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
+    <a href="/weekly?week={{ prev_week }}" style="color:#333;text-decoration:none;font-size:18px">‹</a>
+    {% set week_end = r.days[6].date %}
+    <h2 style="margin:0">
+      {{ r.week_start.month }}/{{ r.week_start.day }} 〜
+      {{ week_end.month }}/{{ week_end.day }}の週
+    </h2>
+    {% if can_next %}
+    <a href="/weekly?week={{ next_week }}" style="color:#333;text-decoration:none;font-size:18px">›</a>
+    {% else %}
+    <span style="color:#ccc;font-size:18px">›</span>
+    {% endif %}
+  </div>
+
+  <p class="total">¥{{ "{:,}".format(r.week_total) }}</p>
+
+  {% if r.is_current_week and r.prev_week_to_date_total is not none %}
+  {# 進行中の週: 途中経過を先週7日分と比べると常に大幅減に見えるため、先週の同じ経過日数までと比較する #}
+  {% set diff = r.week_total - r.prev_week_to_date_total %}
+  <p class="sub" style="margin-bottom:12px">
+    先週同時点比
+    <span class="{{ 'pos' if diff > 0 else 'neg' if diff < 0 else '' }}">
+      {{ '+' if diff >= 0 else '' }}¥{{ "{:,}".format(diff) }}
+    </span>
+    （先週同時点 ¥{{ "{:,}".format(r.prev_week_to_date_total) }} / 先週計 ¥{{ "{:,}".format(r.prev_week_total) }}）
+  </p>
+  {% elif r.prev_week_total %}
+  {% set diff = r.week_total - r.prev_week_total %}
+  <p class="sub" style="margin-bottom:12px">
+    先週比
+    <span class="{{ 'pos' if diff > 0 else 'neg' if diff < 0 else '' }}">
+      {{ '+' if diff >= 0 else '' }}¥{{ "{:,}".format(diff) }}
+    </span>
+    （先週 ¥{{ "{:,}".format(r.prev_week_total) }}）
+  </p>
+  {% endif %}
+</div>
+
+<div class="card">
+  <div class="table-scroll">
+  <table>
+    <thead>
+      <tr>
+        <th></th>
+        {% for k in type_keys %}
+        <th class="num">{{ type_labels[k] }}</th>
+        {% endfor %}
+        <th class="num">合計</th>
+      </tr>
+    </thead>
+    <tbody>
+    {% for d in r.days %}
+    <tr style="{% if d.is_today %}background:#fffbe6;font-weight:bold{% elif d.is_future %}color:#bbb{% endif %}">
+      <td>
+        {{ d.date.month }}/{{ d.date.day }}
+        ({{ weekdays[loop.index0] }})
+        {% if d.is_today %}<span style="font-size:11px;color:#999">今日</span>{% endif %}
+      </td>
+      {% for k in type_keys %}
+      <td class="num">{% if d.by_type.get(k) %}¥{{ "{:,}".format(d.by_type[k]) }}{% else %}-{% endif %}</td>
+      {% endfor %}
+      <td class="num">{% if d.total %}¥{{ "{:,}".format(d.total) }}{% else %}-{% endif %}</td>
+    </tr>
+    {% endfor %}
+    </tbody>
+    <tfoot>
+      <tr style="font-weight:bold;border-top:2px solid #ddd">
+        <td>合計</td>
+        {% for k in type_keys %}
+        <td class="num">¥{{ "{:,}".format(r.days | map(attribute='by_type') | sum(attribute=k)) }}</td>
+        {% endfor %}
+        <td class="num">¥{{ "{:,}".format(r.week_total) }}</td>
+      </tr>
+    </tfoot>
+  </table>
+  </div>
+</div>
+{% endblock %}

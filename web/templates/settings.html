@@ -1,0 +1,39 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="card">
+  <h2>通知時刻の変更</h2>
+  <p class="sub" style="margin-bottom:12px">
+    毎日この時刻に LINE へ通知します（現在: {{ "%02d"|format(hour) }}:{{ "%02d"|format(minute) }}）。<br>
+    変更にはログインパスワードの入力が必要です。
+  </p>
+  <form hx-post="/settings/notify-time" hx-disabled-elt="find button" hx-target="#settings-result" hx-swap="innerHTML">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    <table style="margin-bottom:10px">
+      <tr>
+        <th style="width:90px">時刻</th>
+        <td>
+          <div style="display:flex;align-items:center;gap:6px">
+            <select name="hour" style="width:auto">
+              {% for h in hours %}
+              <option value="{{ h }}" {% if h == hour %}selected{% endif %}>{{ "%02d"|format(h) }}</option>
+              {% endfor %}
+            </select>
+            <span>:</span>
+            <select name="minute" style="width:auto">
+              {% for m in minutes %}
+              <option value="{{ m }}" {% if m == minute %}selected{% endif %}>{{ "%02d"|format(m) }}</option>
+              {% endfor %}
+            </select>
+          </div>
+        </td>
+      </tr>
+      <tr>
+        <th>パスワード</th>
+        <td><input type="password" name="password" placeholder="ログインパスワード" autocomplete="current-password" required></td>
+      </tr>
+    </table>
+    <button type="submit">変更する</button>
+  </form>
+  <div id="settings-result" class="msg"></div>
+</div>
+{% endblock %}

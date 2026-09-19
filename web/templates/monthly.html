@@ -1,0 +1,65 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="card">
+  <h2>月次レポート</h2>
+  <div style="display:flex;align-items:center;gap:12px;margin-bottom:12px;flex-wrap:wrap">
+    <select hx-get="/monthly" hx-target="#monthly-content" hx-swap="innerHTML"
+            name="month" style="padding:6px;border:1px solid #ccc;border-radius:4px"
+            id="month-select">
+      {% for y, m in months %}
+      <option value="{{ y }}-{{ '%02d'|format(m) }}"
+        {% if y == selected_year and m == selected_month %}selected{% endif %}>
+        {{ y }}年{{ m }}月
+      </option>
+      {% endfor %}
+    </select>
+    <a id="csv-link"
+       href="/export/csv?year={{ selected_year }}&month={{ selected_month }}"
+       style="font-size:13px;color:#333;text-decoration:none;border:1px solid #ccc;border-radius:4px;padding:5px 10px">
+      CSV
+    </a>
+  </div>
+  <div id="monthly-content">
+    {% include "monthly_partial.html" %}
+  </div>
+</div>
+
+<div class="card">
+  <h2>直近6ヶ月の推移</h2>
+  <div style="position:relative;height:220px">
+    <canvas id="monthlyChart"></canvas>
+  </div>
+</div>
+{% endblock %}
+{% block scripts %}
+<script>
+document.getElementById('month-select').addEventListener('change', function(){
+  const [y,m]=this.value.split('-');
+  document.getElementById('csv-link').href='/export/csv?year='+y+'&month='+parseInt(m);
+});
+fetch('/api/monthly-trend').then(r=>r.json()).then(function(res){
+  // 種別はAPIの types から動的生成。色は固定パレットをインデックスで循環
+  //（先頭3色は従来の SMCC/JCB/現金 の色を維持）。
+  var palette=['#4e79a7','#f28e2b','#76b7b2','#59a14f','#e15759','#edc949'];
+  new Chart(document.getElementById('monthlyChart'),{
+    type:'bar',
+    data:{
+      labels:res.months.map(function(d){return d.label;}),
+      datasets:res.types.map(function(t,i){
+        return {
+          label:t.label,
+          data:res.months.map(function(d){return d.by_type[t.key]||0;}),
+          backgroundColor:palette[i%palette.length]
+        };
+      })
+    },
+    options:{
+      responsive:true,
+      maintainAspectRatio:false,
+      plugins:{legend:{position:'bottom'},tooltip:{callbacks:{label:function(c){return'¥'+c.raw.toLocaleString();}}}},
+      scales:{x:{stacked:true},y:{stacked:true,ticks:{callback:function(v){return'¥'+v.toLocaleString();}}}}
+    }
+  });
+});
+</script>
+{% endblock %}

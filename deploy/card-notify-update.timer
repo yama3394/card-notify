@@ -1,0 +1,14 @@
+# /etc/systemd/system/card-notify-update.timer
+# 1 日 1 回、静かな時間帯に自動アップデートを起動する。
+# RandomizedDelaySec で配信元へのアクセスを分散し、Persistent で停止中に逃した回を追いかける。
+[Unit]
+Description=card-notify 自動アップデートを毎日実行
+
+[Timer]
+OnCalendar=*-*-* 04:30:00
+RandomizedDelaySec=1800
+Persistent=true
+Unit=card-notify-update.service
+
+[Install]
+WantedBy=timers.target

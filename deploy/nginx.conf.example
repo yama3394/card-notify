@@ -1,0 +1,61 @@
+# card-notify 用 nginx vhost 例。<YOUR_DOMAIN> を自分のドメインに置換し、
+# certbot --nginx で証明書を発行する。アプリは 127.0.0.1:5000。
+#
+# この設定は X-Real-IP を必ず上書きするため、アプリ側の env に
+#   CARD_NOTIFY_TRUSTED_IP_HEADER=X-Real-IP
+# を設定すること。未設定だとアプリから見た接続元が常に nginx（127.0.0.1）になり、
+# ログイン試行ロックが全クライアント共有になる（第三者の失敗3回で自分もロック）。
+# 逆に、X-Real-IP を上書きしないプロキシでこの env を設定してはいけない
+# （クライアントがヘッダを偽装してロックを回避/他者を締め出しできてしまう）。
+
+limit_req_zone $binary_remote_addr zone=cn_limit:10m rate=60r/m;
+limit_req_zone $binary_remote_addr zone=cn_login:10m rate=6r/m;
+
+server {
+    server_name <YOUR_DOMAIN>;
+    charset utf-8;
+
+    limit_req zone=cn_limit burst=20 nodelay;
+    limit_req_status 429;
+
+    add_header X-Frame-Options "DENY" always;
+    add_header X-Content-Type-Options "nosniff" always;
+    add_header Strict-Transport-Security "max-age=31536000; includeSubDomains" always;
+
+    # ── 任意: Cloudflare を使う場合のみ有効化 ─────────────────────────
+    # オリジン直叩きを塞ぐには、Cloudflare の全 IP レンジのみ allow して
+    # deny all を置く（レンジは https://www.cloudflare.com/ips/ の最新版を使用）。
+    # また実クライアント IP を復元するため real_ip 設定も入れる。
+    #   set_real_ip_from <CF_RANGE>;   (各レンジぶん)
+    #   real_ip_header CF-Connecting-IP;
+    #   allow <CF_RANGE>; ... ; allow 127.0.0.1; deny all;
+
+    location /login {
+        limit_req zone=cn_login burst=3 nodelay;
+        proxy_pass http://127.0.0.1:5000/login;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+    }
+
+    location / {
+        proxy_pass http://127.0.0.1:5000;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_read_timeout 60s;
+    }
+
+    location ~ /\. { deny all; }
+
+    listen 443 ssl;   # certbot --nginx が管理
+}
+
+server {
+    listen 80;
+    server_name <YOUR_DOMAIN>;
+    return 301 https://$host$request_uri;
+}

@@ -1,0 +1,65 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="card">
+  <h2>初回セットアップ</h2>
+  <p class="sub" style="margin-bottom:12px">
+    はじめての起動です。WebUI にログインするためのパスワードと、LINE Messaging API
+    のチャンネル情報を設定してください（この画面が出るのは最初の1回だけです）。
+  </p>
+  {% if error %}
+  <p style="color:#c00;margin-bottom:10px;font-size:13px">{{ error }}</p>
+  {% endif %}
+  <form method="post" action="/setup" autocomplete="on">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    <table style="margin-bottom:10px">
+      <tr>
+        <th style="width:150px">セットアップトークン</th>
+        <td>
+          <input type="text" name="setup_token" required
+                 placeholder="インストール完了時に表示されたトークン"
+                 autocomplete="off">
+          <p class="sub" style="margin-top:4px;font-size:12px">
+            インストーラの出力、またはサーバーのデータディレクトリ内
+            <code>setup_token</code> ファイルで確認できます（所有者確認のため必須）
+          </p>
+        </td>
+      </tr>
+      <tr>
+        <th style="width:150px">WebUIログインパスワード</th>
+        <td>
+          <input type="password" name="password" placeholder="8文字以上"
+                 autocomplete="new-password" required>
+        </td>
+      </tr>
+      <tr>
+        <th>パスワード（確認）</th>
+        <td>
+          <input type="password" name="password_confirm"
+                 autocomplete="new-password" required>
+        </td>
+      </tr>
+    </table>
+    <p class="sub" style="margin-bottom:10px">
+      LINE Developers で作成したチャンネルの値を貼り付けてください（後で設定ファイルを直接編集して変更もできます）
+    </p>
+    <table style="margin-bottom:10px">
+      <tr>
+        <th style="width:150px">LINEチャンネルアクセストークン</th>
+        <td><input type="text" name="line_token" required></td>
+      </tr>
+      <tr>
+        <th>LINEチャンネルシークレット</th>
+        <td><input type="text" name="line_secret" required></td>
+      </tr>
+      <tr>
+        <th>WebUIの公開URL（任意）</th>
+        <td>
+          <input type="text" name="site_url" value="{{ site_url }}"
+                 placeholder="https://card.example.com（未入力なら http://127.0.0.1:5000）">
+        </td>
+      </tr>
+    </table>
+    <button type="submit" style="width:100%">設定を保存して次へ（Gmail連携）</button>
+  </form>
+</div>
+{% endblock %}

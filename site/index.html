@@ -1,0 +1,919 @@
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>card-notify — カードの利用通知を、毎日LINEで家計簿に</title>
+<meta name="description" content="クレジットカードの利用通知メールを自動取得し、毎日LINEに支出サマリを届けるセルフホスト型の家計管理ツール。データは自分のサーバー内。MIT・無保証。">
+<meta name="color-scheme" content="light dark">
+<meta name="theme-color" content="#F4EEE1" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#17130E" media="(prefers-color-scheme: dark)">
+<link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect x='1.5' y='1.5' width='29' height='29' rx='8.5' fill='%232E6C8E'/%3E%3Cpath d='M8.5 21.5c0-4 0-6 1.4-7.4C11.3 12.7 13 12.7 16 12.7s4.7 0 6.1 1.4c1.4 1.4 1.4 3.4 1.4 7.4' stroke='%23F4EEE1' stroke-width='1.8' stroke-linecap='round' fill='none'/%3E%3Cpath d='M11.5 11.5 16 16l4.5-4.5' stroke='%23F4EEE1' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round' fill='none'/%3E%3Cpath d='M16 16.2v5.3M13.4 18.1h5.2M13.4 20.4h5.2' stroke='%23F4EEE1' stroke-width='1.7' stroke-linecap='round' fill='none'/%3E%3C/svg%3E">
+<style>
+  /* ---------- Tokens ---------- */
+  :root {
+    --paper:      #F4EEE1;
+    --surface:    #FBF7EC;
+    --surface-2:  #EAE1CC;
+    --ink:        #2B2117;
+    --muted:      #5B5140;
+    --faint:      #8A7F68;
+    --line:       #DED2B4;
+    --accent:     #2E6C8E;   /* ai(藍) — icons / fills / hairline accents */
+    --accent-ink: #17435C;   /* ai(藍) — text on paper, AA-safe */
+    --accent-soft:#E1E9EA;
+    --stamp:      #B14428;   /* shu(朱) — 済印。使用箇所は最小限に絞る */
+    --stamp-soft: #F1DDD2;
+    --shadow:     0 1px 2px rgba(43,33,23,.05), 0 12px 30px -18px rgba(43,33,23,.24);
+    --shadow-lg:  0 30px 70px -30px rgba(43,33,23,.32);
+    --radius:     14px;
+    --maxw:       1080px;
+    --mono: ui-monospace, "SF Mono", "SFMono-Regular", "JetBrains Mono", "Cascadia Mono", Menlo, Consolas, monospace;
+    --sans: system-ui, -apple-system, "Segoe UI", "Hiragino Sans", "Hiragino Kaku Gothic ProN", "Noto Sans JP", "Yu Gothic UI", Meiryo, sans-serif;
+    --display: "Hiragino Maru Gothic ProN", "BIZ UDPGothic", "UD Digi Kyokasho NP-R", system-ui, -apple-system, "Hiragino Sans", "Noto Sans JP", "Yu Gothic UI", Meiryo, sans-serif;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --paper:      #17130E;
+      --surface:    #201A11;
+      --surface-2:  #2A2216;
+      --ink:        #F1E8D6;
+      --muted:      #C6B99C;
+      --faint:      #94886C;
+      --line:       #3B311F;
+      --accent:     #6FB2D4;
+      --accent-ink: #8FC6E2;
+      --accent-soft:#1E323B;
+      --stamp:      #E17A56;
+      --stamp-soft: #3B2419;
+      --shadow:     0 1px 2px rgba(0,0,0,.4), 0 16px 40px -22px rgba(0,0,0,.7);
+      --shadow-lg:  0 40px 90px -35px rgba(0,0,0,.75);
+    }
+  }
+  :root[data-theme="dark"] {
+    --paper:      #17130E;
+    --surface:    #201A11;
+    --surface-2:  #2A2216;
+    --ink:        #F1E8D6;
+    --muted:      #C6B99C;
+    --faint:      #94886C;
+    --line:       #3B311F;
+    --accent:     #6FB2D4;
+    --accent-ink: #8FC6E2;
+    --accent-soft:#1E323B;
+    --stamp:      #E17A56;
+    --stamp-soft: #3B2419;
+    --shadow:     0 1px 2px rgba(0,0,0,.4), 0 16px 40px -22px rgba(0,0,0,.7);
+    --shadow-lg:  0 40px 90px -35px rgba(0,0,0,.75);
+  }
+
+  /* ---------- Base ---------- */
+  * { box-sizing: border-box; }
+  html { scroll-behavior: smooth; }
+  @media (prefers-reduced-motion: reduce) { html { scroll-behavior: auto; } *{ animation: none !important; transition: none !important; } }
+  body {
+    margin: 0;
+    font-family: var(--sans);
+    color: var(--ink);
+    background: var(--paper);
+    line-height: 1.65;
+    -webkit-font-smoothing: antialiased;
+    text-rendering: optimizeLegibility;
+  }
+  .wrap { width: 100%; max-width: var(--maxw); margin-inline: auto; padding-inline: 22px; }
+  h1, h2, h3 { line-height: 1.25; letter-spacing: -0.01em; margin: 0; font-family: var(--display); }
+  p { margin: 0; }
+  a { color: var(--accent-ink); text-decoration: none; }
+  a:hover { text-decoration: underline; text-underline-offset: 3px; }
+  :focus-visible { outline: 2.5px solid var(--accent); outline-offset: 3px; border-radius: 5px; }
+  .eyebrow {
+    display: inline-flex; align-items: center; gap: 9px;
+    font: 700 .86rem/1 var(--sans); color: var(--accent-ink); margin: 0 0 14px;
+  }
+  .eyebrow::before { content: ""; width: 16px; height: 2px; border-radius: 2px; background: var(--accent); flex: none; }
+  .num { font-variant-numeric: tabular-nums; }
+  .mono { font-family: var(--mono); }
+  .skip { position: absolute; left: -999px; top: 0; background: var(--ink); color: var(--paper); padding: 10px 14px; border-radius: 8px; z-index: 100; }
+  .skip:focus { left: 12px; top: 12px; }
+  .mark path, .avatar svg path { stroke: var(--paper); }
+
+  /* ---------- Header ---------- */
+  header.site {
+    position: sticky; top: 0; z-index: 50;
+    background: color-mix(in srgb, var(--paper) 82%, transparent);
+    backdrop-filter: saturate(1.3) blur(10px);
+    border-bottom: 1px solid var(--line);
+  }
+  .bar { display: flex; align-items: center; gap: 20px; height: 62px; }
+  .brand { display: inline-flex; align-items: center; gap: 10px; font-weight: 800; letter-spacing: -.01em; color: var(--ink); font-size: 1.08rem; font-family: var(--display); }
+  .brand:hover { text-decoration: none; }
+  .mark { width: 30px; height: 30px; flex: none; display: block; }
+  .mark rect { fill: var(--accent); }
+  .nav { margin-left: auto; display: flex; align-items: center; gap: 4px; }
+  .nav a { color: var(--muted); font-size: .92rem; font-weight: 600; padding: 8px 11px; border-radius: 8px; }
+  .nav a:hover { color: var(--ink); background: var(--surface-2); text-decoration: none; }
+  .nav .desk { display: none; }
+  @media (min-width: 760px){ .nav .desk { display: inline-block; } }
+  .toggle {
+    margin-left: 6px; width: 38px; height: 38px; flex: none;
+    display: inline-grid; place-items: center; cursor: pointer;
+    background: var(--surface); border: 1px solid var(--line); color: var(--ink);
+    border-radius: 10px;
+  }
+  .toggle:hover { border-color: var(--accent); }
+  .toggle svg { width: 18px; height: 18px; }
+  .toggle .moon { display: none; }
+  :root[data-theme="dark"] .toggle .sun { display: none; }
+  :root[data-theme="dark"] .toggle .moon { display: block; }
+  @media (prefers-color-scheme: dark){
+    :root:not([data-theme="light"]) .toggle .sun { display: none; }
+    :root:not([data-theme="light"]) .toggle .moon { display: block; }
+  }
+
+  /* ---------- Hero ---------- */
+  .hero { padding: 60px 0 34px; }
+  .hero-grid { display: grid; gap: 48px; align-items: center; }
+  @media (min-width: 900px){ .hero-grid { grid-template-columns: 1.05fr .95fr; gap: 56px; } }
+  .hero h1 { font-size: clamp(2.1rem, 6vw, 3.3rem); font-weight: 800; letter-spacing: -.02em; }
+  .hero h1 .g { color: var(--accent-ink); }
+  .lead { color: var(--muted); font-size: clamp(1.02rem, 2.4vw, 1.16rem); margin-top: 20px; max-width: 36ch; }
+
+  /* reassurance list（旧: pill badges） */
+  .reassure { list-style: none; padding: 0; margin: 26px 0 0; display: grid; gap: 9px; }
+  .reassure li { display: flex; gap: 10px; color: var(--muted); font-size: .92rem; line-height: 1.5; }
+  .reassure li::before { content: "✓"; flex: none; color: var(--accent-ink); font-weight: 700; }
+
+  .hero-actions { margin-top: 26px; display: flex; flex-wrap: wrap; gap: 10px 18px; align-items: center; }
+  .btn-ghost { font-weight: 600; color: var(--ink); display: inline-flex; align-items: center; gap: 6px; }
+  .btn-ghost svg { width: 16px; height: 16px; color: var(--accent-ink); }
+
+  /* install block — quiet, secondary to the human pitch */
+  .install { margin-top: 30px; padding-top: 22px; border-top: 1px dashed var(--line); }
+  .install-label { font-size: .78rem; font-weight: 700; color: var(--faint); margin-bottom: 9px; }
+  .cmd {
+    display: flex; align-items: stretch; gap: 0;
+    background: var(--surface); border: 1px solid var(--line);
+    border-radius: 10px; overflow: hidden;
+  }
+  .cmd code {
+    font-family: var(--mono); font-size: .82rem; color: var(--muted);
+    padding: 13px 15px; overflow-x: auto; white-space: nowrap; flex: 1; line-height: 1.5;
+  }
+  .cmd code .p { color: var(--accent-ink); }
+  .cmd code .dim { color: var(--faint); }
+  .copy {
+    flex: none; border: 0; border-left: 1px solid var(--line);
+    background: var(--surface-2); color: var(--ink); cursor: pointer;
+    font: 600 .8rem var(--sans); padding: 0 15px; display: inline-flex; align-items: center; gap: 7px;
+  }
+  .copy:hover { background: var(--accent); color: var(--paper); }
+  .copy svg { width: 15px; height: 15px; }
+  .cmd-note { font-size: .78rem; color: var(--faint); margin-top: 9px; line-height: 1.55; }
+
+  /* ---------- Phone / notification signature ---------- */
+  .stage { position: relative; display: grid; place-items: center; }
+  .glow { position: absolute; inset: 8% 12%; background: radial-gradient(60% 55% at 60% 30%, color-mix(in srgb, var(--accent) 22%, transparent), transparent 70%); filter: blur(30px); z-index: 0; }
+  .phone {
+    position: relative; z-index: 1; width: 100%; max-width: 330px;
+    background: var(--surface); border: 1px solid var(--line);
+    border-radius: 30px; padding: 12px; box-shadow: var(--shadow-lg);
+  }
+  .screen { background: var(--surface-2); border-radius: 22px; padding: 14px 13px 18px; }
+  .statusbar { display: flex; justify-content: space-between; align-items: center; color: var(--faint); font-size: .72rem; font-weight: 600; padding: 2px 8px 12px; }
+  .statusbar .dots { display: inline-flex; gap: 4px; }
+  .statusbar .dots span { width: 5px; height: 5px; border-radius: 50%; background: currentColor; opacity: .55; }
+  .chat { display: grid; gap: 10px; }
+  .msg-row { display: flex; gap: 9px; align-items: flex-end; }
+  .avatar { width: 34px; height: 34px; flex: none; border-radius: 10px; background: var(--accent); display: grid; place-items: center; }
+  .avatar svg { width: 19px; height: 19px; }
+  .bubble {
+    position: relative;
+    background: var(--surface); border: 1px solid var(--line); border-radius: 4px 16px 16px 16px;
+    padding: 13px 14px; box-shadow: var(--shadow); max-width: 100%;
+  }
+  .bubble .sender { font-size: .72rem; font-weight: 700; color: var(--muted); margin-bottom: 8px; display: flex; justify-content: space-between; align-items: center; }
+  .bubble .sender time { font-weight: 500; color: var(--faint); }
+  .b-title { font-family: var(--display); font-size: .84rem; font-weight: 700; color: var(--ink); display: flex; align-items: center; gap: 6px; }
+  .b-title svg { width: 15px; height: 15px; color: var(--accent-ink); }
+  .b-total { font-family: var(--mono); font-variant-numeric: tabular-nums; font-size: 1.9rem; font-weight: 700; letter-spacing: -.02em; margin: 6px 0 2px; color: var(--ink); }
+  .b-total .yen { font-size: 1.15rem; color: var(--muted); font-weight: 600; margin-right: 2px; }
+  .b-total .cnt { font-size: .72rem; font-family: var(--sans); color: var(--faint); font-weight: 600; margin-left: 6px; }
+  .b-rows { margin: 12px 0 4px; border-top: 1px dashed var(--line); padding-top: 10px; display: grid; gap: 8px; }
+  .b-row { display: flex; justify-content: space-between; align-items: baseline; font-size: .8rem; }
+  .b-row .lbl { color: var(--muted); font-weight: 600; }
+  .b-row .val { font-family: var(--mono); font-variant-numeric: tabular-nums; color: var(--ink); font-weight: 600; }
+  .b-row.fx .val { color: var(--accent-ink); }
+  .b-row .tag { font-size: .64rem; font-weight: 700; color: var(--accent-ink); background: var(--accent-soft); border-radius: 5px; padding: 1px 6px; margin-left: 6px; }
+  .b-hint { margin-top: 12px; font-size: .72rem; color: var(--faint); background: var(--surface-2); border-radius: 8px; padding: 8px 10px; line-height: 1.5; }
+
+  /* 済スタンプ（signature） */
+  .stamp {
+    position: absolute; top: -16px; right: -8px; z-index: 2;
+    width: 56px; height: 56px; border-radius: 50%;
+    display: grid; place-items: center;
+    font-family: var(--display); font-weight: 800; font-size: 1.05rem; letter-spacing: .02em;
+    color: var(--stamp); border: 2px solid var(--stamp);
+    background: color-mix(in srgb, var(--stamp) 7%, var(--surface));
+    transform: rotate(-11deg);
+    opacity: 1;
+    animation: stampIn .55s cubic-bezier(.22,.85,.32,1) .4s both;
+  }
+  .stamp::after { content: ""; position: absolute; inset: 5px; border: 1px solid var(--stamp); border-radius: 50%; opacity: .55; }
+  @keyframes stampIn {
+    0%   { transform: rotate(-11deg) scale(2.6); opacity: 0; }
+    55%  { transform: rotate(-11deg) scale(.94); opacity: 1; }
+    100% { transform: rotate(-11deg) scale(1); opacity: 1; }
+  }
+
+  /* ---------- Sections ---------- */
+  section { padding: 66px 0; }
+  .sec-head { max-width: 46ch; margin-bottom: 42px; }
+  .sec-head h2 { font-size: clamp(1.5rem, 4vw, 2.05rem); font-weight: 800; letter-spacing: -.02em; }
+  .sec-head p { color: var(--muted); margin-top: 12px; }
+
+  /* news teaser（トップページの最新お知らせ） */
+  .news-teaser { padding: 40px 0; }
+  .news-head { display: flex; align-items: baseline; justify-content: space-between; gap: 16px; margin-bottom: 22px; flex-wrap: wrap; }
+  .news-head h2 { font-size: 1.3rem; font-weight: 800; letter-spacing: -.01em; }
+  .news-all { font-size: .88rem; font-weight: 700; white-space: nowrap; }
+  .news-items { display: grid; gap: 0; }
+  .news-item { display: flex; gap: 16px; align-items: baseline; padding: 14px 0; border-top: 1px solid var(--line); }
+  .news-item time { flex: none; font-family: var(--mono); font-variant-numeric: tabular-nums; color: var(--faint); font-size: .82rem; width: 6.5em; }
+  .news-item a { color: var(--ink); font-weight: 600; }
+  .news-item a:hover { color: var(--accent-ink); }
+  .news-empty { color: var(--muted); font-size: .92rem; padding: 14px 0; border-top: 1px solid var(--line); }
+
+  /* ── differentiator（他の家計簿との違い） ── */
+  .diff { background: var(--surface-2); }
+  .diff-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 18px; }
+  @media (max-width: 720px) { .diff-grid { grid-template-columns: 1fr; } }
+  .diff-col { background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius); padding: 22px 24px; box-shadow: var(--shadow); }
+  .diff-col h3 { font-size: 1.02rem; font-weight: 700; margin-bottom: 14px; }
+  .diff-col.new { border-color: var(--accent-ink); }
+  .diff-col.new h3 { color: var(--accent-ink); }
+  .diff-col ul { list-style: none; display: grid; gap: 10px; padding: 0; margin: 0; }
+  .diff-col li { display: flex; gap: 10px; color: var(--muted); line-height: 1.55; }
+  .diff-col.new li { color: var(--ink); }
+  .diff-col .mark { flex: none; font-weight: 700; }
+  .diff-col.old .mark { color: var(--faint); }
+  .diff-col.new .mark { color: var(--accent-ink); }
+  .diff-note { margin-top: 18px; color: var(--muted); font-size: .92rem; max-width: 70ch; line-height: 1.7; }
+
+  /* ── parser request（未対応カードの追加依頼） ── */
+  .req-box { background: var(--surface); border: 1px solid var(--accent-ink); border-radius: var(--radius); padding: 30px 28px; box-shadow: var(--shadow); max-width: 760px; }
+  .req-box h2 { font-size: clamp(1.3rem, 3.4vw, 1.7rem); font-weight: 800; letter-spacing: -.01em; margin-top: 6px; }
+  .req-box p { color: var(--muted); margin-top: 12px; line-height: 1.75; }
+  .btn-mail { display: inline-flex; align-items: center; gap: 10px; margin-top: 18px; padding: 12px 20px; border-radius: 10px; background: var(--ink); color: var(--paper); font-weight: 700; text-decoration: none; }
+  .btn-mail:hover { background: var(--accent-ink); }
+  .btn-mail .addr { font-family: var(--mono); font-weight: 500; font-size: .88em; opacity: .85; }
+  .req-note { font-size: .88rem; }
+
+  /* features — de-boxed ledger list（罫線区切り、カード枠なし） */
+  .cards { display: grid; gap: 30px 44px; }
+  @media (min-width: 640px){ .cards { grid-template-columns: 1fr 1fr; } }
+  @media (min-width: 980px){ .cards { grid-template-columns: 1fr 1fr 1fr; } }
+  .card { border-top: 1px solid var(--line); padding-top: 20px; }
+  .card .ico { width: 36px; height: 36px; border-radius: 50%; border: 1.5px solid var(--accent-ink); display: grid; place-items: center; margin-bottom: 14px; }
+  .card .ico svg { width: 17px; height: 17px; color: var(--accent-ink); }
+  .card h3 { font-size: 1.02rem; font-weight: 700; }
+  .card p { color: var(--muted); font-size: .9rem; margin-top: 8px; }
+
+  /* how it works — illustrated diagram（画像風の4コマ図解） */
+  .diagram { margin: 4px 0 48px; }
+  .diagram-row { display: flex; align-items: flex-start; justify-content: space-between; gap: 6px; flex-wrap: wrap; }
+  .dia-stage { display: flex; flex-direction: column; align-items: center; gap: 12px; text-align: center; width: 130px; }
+  .dia-ico { width: 76px; height: 76px; flex: none; }
+  .dia-cap { font-family: var(--display); font-size: .84rem; font-weight: 700; color: var(--ink); }
+  .dia-arrow { flex: none; align-self: center; color: var(--line); margin-top: 28px; }
+  .dia-arrow svg { width: 22px; height: 22px; }
+  @media (max-width: 700px) {
+    .diagram-row { justify-content: space-around; row-gap: 30px; }
+    .dia-arrow { display: none; }
+    .dia-stage { width: 42%; }
+  }
+  .dia-surface     { fill: var(--surface); stroke: var(--line); }
+  .dia-line        { stroke: var(--line); }
+  .dia-ink-line    { stroke: var(--ink); }
+  .dia-ink-text    { fill: var(--ink); font-family: var(--mono); }
+  .dia-accent-line { stroke: var(--accent-ink); }
+  .dia-accent-fill { fill: var(--accent); }
+  .dia-accent-text { fill: var(--paper); font-family: var(--sans); }
+  .dia-dot         { fill: var(--faint); }
+  .dia-stamp-ring  { stroke: var(--stamp); fill: none; }
+  .dia-stamp-check { stroke: var(--stamp); fill: none; }
+
+  /* how it works — 朱スタンプの帳簿タイムライン（箱/矢印なし） */
+  .flow { position: relative; display: grid; gap: 34px; counter-reset: step; }
+  @media (min-width: 860px){ .flow { grid-template-columns: repeat(4, 1fr); gap: 22px; } }
+  @media (min-width: 860px){ .flow::before { content: ""; position: absolute; left: 4%; right: 4%; top: 20px; height: 1px; background: var(--line); } }
+  .step { position: relative; padding-left: 54px; }
+  @media (min-width: 860px){ .step { padding: 56px 8px 0; text-align: center; } }
+  .step .n {
+    position: absolute; left: 0; top: 0; width: 40px; height: 40px; z-index: 1;
+    border-radius: 50%; border: 2px solid var(--stamp); color: var(--stamp);
+    display: grid; place-items: center; font-family: var(--display); font-weight: 800; font-size: .98rem;
+    background: color-mix(in srgb, var(--stamp) 7%, var(--paper));
+  }
+  .step .n::before { content: counter(step, decimal-leading-zero); }
+  @media (min-width: 860px){ .step .n { left: 50%; top: 0; transform: translateX(-50%); } }
+  .step .sico { width: 30px; height: 30px; margin: 4px 0 12px; color: var(--accent-ink); }
+  @media (min-width: 860px){ .step .sico { margin-inline: auto; } }
+  .step .sico svg { width: 100%; height: 100%; }
+  .step h3 { font-size: 1rem; font-weight: 700; }
+  .step p { color: var(--muted); font-size: .87rem; margin-top: 7px; }
+  .step .arr { display: none; }
+
+  /* setup — 朱スタンプの手順リスト（カード枠なし、点線区切り） */
+  .steps { display: grid; gap: 0; counter-reset: sstep; }
+  @media (min-width: 720px){ .steps { grid-template-columns: 1fr 1fr; column-gap: 40px; } }
+  .srow { display: flex; gap: 16px; align-items: flex-start; padding: 20px 0; border-bottom: 1px dashed var(--line); }
+  .srow .idx {
+    counter-increment: sstep; flex: none; width: 38px; height: 38px; border-radius: 50%;
+    border: 2px solid var(--stamp); color: var(--stamp); background: color-mix(in srgb, var(--stamp) 7%, var(--paper));
+    display: grid; place-items: center; font-family: var(--display); font-weight: 800; font-size: .92rem;
+  }
+  .srow .idx::before { content: counter(sstep); }
+  .srow h3 { font-size: 1rem; font-weight: 700; }
+  .srow p { color: var(--muted); font-size: .87rem; margin-top: 6px; }
+  .srow p code { font-family: var(--mono); font-size: .82em; color: var(--accent-ink); }
+  .setup-cta { margin-top: 26px; font-size: .92rem; color: var(--muted); }
+
+  /* recommended specs（推奨環境の目安表） */
+  .specs { margin: 0 0 40px; }
+  .specs-note { color: var(--muted); font-size: .9rem; line-height: 1.7; margin-bottom: 18px; max-width: 68ch; }
+  .specs-scroll { overflow-x: auto; border: 1px solid var(--line); border-radius: var(--radius); background: var(--surface); }
+  .specs table { width: 100%; min-width: 480px; border-collapse: collapse; font-size: .87rem; }
+  .specs th, .specs td { text-align: left; padding: 12px 16px; border-bottom: 1px solid var(--line); }
+  .specs thead th { font-family: var(--display); font-weight: 700; color: var(--ink); font-size: .82rem; background: var(--surface-2); }
+  .specs tbody th { font-weight: 600; color: var(--muted); white-space: nowrap; width: 1%; }
+  .specs td { color: var(--ink); }
+  .specs tbody tr:last-child th, .specs tbody tr:last-child td { border-bottom: 0; }
+  .specs-foot { margin-top: 12px; font-size: .82rem; color: var(--faint); line-height: 1.6; }
+
+  /* faq */
+  .faq { display: grid; gap: 12px; max-width: 780px; }
+  details { background: var(--surface); border: 1px solid var(--line); border-radius: 12px; padding: 4px 20px; box-shadow: var(--shadow); }
+  details[open] { border-color: color-mix(in srgb, var(--accent) 40%, var(--line)); }
+  summary { cursor: pointer; list-style: none; font-weight: 700; font-size: .98rem; padding: 15px 0; display: flex; justify-content: space-between; align-items: center; gap: 14px; }
+  summary::-webkit-details-marker { display: none; }
+  summary .pm { flex: none; width: 20px; height: 20px; position: relative; color: var(--accent-ink); }
+  summary .pm::before, summary .pm::after { content: ""; position: absolute; background: currentColor; border-radius: 2px; }
+  summary .pm::before { top: 9px; left: 2px; right: 2px; height: 2px; }
+  summary .pm::after { left: 9px; top: 2px; bottom: 2px; width: 2px; transition: transform .2s ease; }
+  details[open] summary .pm::after { transform: scaleY(0); }
+  details .a { color: var(--muted); font-size: .9rem; padding: 0 0 18px; line-height: 1.7; }
+  details .a code { font-family: var(--mono); font-size: .84em; color: var(--accent-ink); }
+  details .a strong { color: var(--ink); }
+
+  /* footer */
+  footer.site { background: var(--surface); border-top: 1px solid var(--line); padding: 44px 0 40px; }
+  .foot-top { display: flex; flex-wrap: wrap; gap: 20px 40px; align-items: flex-start; justify-content: space-between; }
+  .foot-brand { max-width: 40ch; }
+  .foot-brand p { color: var(--muted); font-size: .86rem; margin-top: 12px; }
+  .disc { margin-top: 26px; padding-top: 22px; border-top: 1px solid var(--line); display: grid; gap: 8px; }
+  .disc p { font-size: .76rem; color: var(--faint); line-height: 1.6; }
+  .disc .lic { color: var(--muted); font-weight: 600; }
+</style>
+
+<a class="skip" href="#main">本文へスキップ</a>
+
+<header class="site">
+  <div class="wrap bar">
+    <a class="brand" href="#top" aria-label="card-notify ホーム">
+      <svg class="mark" viewBox="0 0 32 32" fill="none" aria-hidden="true">
+        <rect x="1.5" y="1.5" width="29" height="29" rx="8.5"/>
+        <path d="M8.5 21.5c0-4 0-6 1.4-7.4C11.3 12.7 13 12.7 16 12.7s4.7 0 6.1 1.4c1.4 1.4 1.4 3.4 1.4 7.4" stroke-width="1.8" stroke-linecap="round"/>
+        <path d="M11.5 11.5 16 16l4.5-4.5" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
+        <path d="M16 16.2v5.3M13.4 18.1h5.2M13.4 20.4h5.2" stroke-width="1.7" stroke-linecap="round"/>
+      </svg>
+      <span>card-notify</span>
+    </a>
+    <nav class="nav" aria-label="セクション">
+      <a class="desk" href="#features">特徴</a>
+      <a class="desk" href="#how">仕組み</a>
+      <a class="desk" href="#setup">セットアップ</a>
+      <a class="desk" href="#faq">FAQ</a>
+      <a class="desk" href="/news">お知らせ</a>
+      <button class="toggle" id="themeToggle" type="button" aria-label="ライト / ダークテーマを切り替え">
+        <svg class="sun" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><circle cx="12" cy="12" r="4.2"/><path d="M12 2.5v2.5M12 19v2.5M4.5 4.5l1.8 1.8M17.7 17.7l1.8 1.8M2.5 12H5M19 12h2.5M4.5 19.5l1.8-1.8M17.7 6.3l1.8-1.8"/></svg>
+        <svg class="moon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 14.5A8 8 0 0 1 9.5 4a7 7 0 1 0 10.5 10.5z"/></svg>
+      </button>
+    </nav>
+  </div>
+</header>
+
+<main id="main">
+  <span id="top"></span>
+
+  <!-- HERO -->
+  <section class="hero" aria-labelledby="h1">
+    <div class="wrap hero-grid">
+      <div>
+        <p class="eyebrow">セルフホスト型・家計通知ツール</p>
+        <h1 id="h1">カードの利用通知を、<br>毎日<span class="g">LINE</span>で家計簿に。</h1>
+        <p class="lead">クレジットカードの利用通知メールを自動で読み取り、その日の支出サマリを毎朝LINEへ。家計簿への登録作業はほぼゼロに。データは自分のサーバーの中だけに残ります。</p>
+
+        <ul class="reassure" aria-label="主な前提">
+          <li>自分のサーバーで完結。データはどこにも預けません</li>
+          <li>広告・課金なし。MIT ライセンスの無償ソフトです</li>
+          <li>普段使っている Gmail と LINE だけで動きます</li>
+        </ul>
+
+        <div class="hero-actions">
+          <a class="btn-ghost" href="#how">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12h14M13 6l6 6-6 6"/></svg>
+            仕組みを見る
+          </a>
+          <a class="btn-ghost" href="./README.md">README（詳細手順）</a>
+        </div>
+
+        <div class="install">
+          <p class="install-label">サーバーにインストール</p>
+          <div class="cmd">
+            <code id="cmdText"><span class="dim">$</span> curl -fsSL <span class="p">https://card-notify.yama3394.uk</span>/install.sh | bash</code>
+            <button class="copy" id="copyBtn" type="button" aria-label="インストールコマンドをコピー">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V5a2 2 0 0 1 2-2h10"/></svg>
+              <span id="copyLabel">コピー</span>
+            </button>
+          </div>
+          <p class="cmd-note">Linux サーバーで実行すると、専用ユーザー作成・依存導入・初期設定ウィザードまで自動で進みます。</p>
+        </div>
+      </div>
+
+      <!-- Signature: the daily LINE push, styled as a stamped ledger slip -->
+      <div class="stage" aria-hidden="false">
+        <div class="glow"></div>
+        <div class="phone" role="img" aria-label="card-notify が毎朝LINEに送る支出サマリの例。昨日の合計12,480円・3件、三井住友カード8,200円、JCB4,280円、外貨は別集計で12.50ドル。「済」の確認印つき。">
+          <div class="screen">
+            <div class="statusbar">
+              <span class="num">8:00</span>
+              <span class="dots"><span></span><span></span><span></span></span>
+            </div>
+            <div class="chat">
+              <div class="msg-row">
+                <div class="avatar">
+                  <svg viewBox="0 0 32 32" fill="none" aria-hidden="true">
+                    <path d="M8 22c0-4 0-6 1.4-7.4C10.7 13.2 12.3 13.2 16 13.2s5.3 0 6.6 1.4C24 16 24 18 24 22" stroke-width="2" stroke-linecap="round"/>
+                    <path d="M16 16.5v5M13 18.4h6M13 20.7h6" stroke-width="2" stroke-linecap="round"/>
+                  </svg>
+                </div>
+                <div class="bubble">
+                  <span class="stamp" aria-hidden="true">済</span>
+                  <div class="sender"><span>card-notify</span><time datetime="08:00">今朝 8:00</time></div>
+                  <div class="b-title">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 20V10M10 20V4M16 20v-7M22 20H2"/></svg>
+                    昨日の支出サマリ
+                  </div>
+                  <div class="b-total num"><span class="yen">¥</span>12,480<span class="cnt">3件</span></div>
+                  <div class="b-rows">
+                    <div class="b-row"><span class="lbl">三井住友カード</span><span class="val num">¥8,200</span></div>
+                    <div class="b-row"><span class="lbl">JCB</span><span class="val num">¥4,280</span></div>
+                    <div class="b-row fx"><span class="lbl">外貨<span class="tag">別集計</span></span><span class="val num">$12.50</span></div>
+                  </div>
+                  <p class="b-hint">現金支出は、金額をこのトークに送るだけで記録できます。</p>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- NEWS TEASER（最新のお知らせ。/news.json を取得して描画。取得できない場合は静かにフォールバック） -->
+  <section class="news-teaser" aria-labelledby="news-teaser-h">
+    <div class="wrap">
+      <div class="news-head">
+        <h2 id="news-teaser-h">お知らせ</h2>
+        <a class="news-all" href="/news">すべて見る →</a>
+      </div>
+      <div class="news-items" id="newsItems">
+        <p class="news-empty">読み込み中…</p>
+      </div>
+    </div>
+  </section>
+
+  <!-- WHY DIFFERENT（他の家計簿との差別点） -->
+  <section class="diff" id="why" aria-labelledby="why-h">
+    <div class="wrap">
+      <div class="sec-head">
+        <p class="eyebrow">ほかの家計簿との違い</p>
+        <h2 id="why-h">「記録する」を、やめられる。</h2>
+        <p>家計簿が続かない一番の理由は、レシート撮影や金額の手入力といった「記録の手間」。card-notify は、カードを使うたびに届く<strong>利用通知メールを自動で取り込む</strong>ので、支出は使った直後から勝手に家計簿へ載っていきます。登録作業そのものが、ほぼなくなります。</p>
+      </div>
+      <div class="diff-grid">
+        <div class="diff-col old">
+          <h3>手入力の家計簿アプリ</h3>
+          <ul>
+            <li><span class="mark" aria-hidden="true">✕</span><span>レシートを撮って、金額と店名を打ち込む</span></li>
+            <li><span class="mark" aria-hidden="true">✕</span><span>入力を忘れた日から記録が歯抜けになる</span></li>
+            <li><span class="mark" aria-hidden="true">✕</span><span>続けるほど「毎日の作業」が積み上がる</span></li>
+          </ul>
+        </div>
+        <div class="diff-col new">
+          <h3>card-notify</h3>
+          <ul>
+            <li><span class="mark" aria-hidden="true">✓</span><span>カード決済は利用通知メールから<strong>全自動で登録</strong>。入力ゼロ</span></li>
+            <li><span class="mark" aria-hidden="true">✓</span><span>使った直後に記録されるので、抜け漏れが起きない</span></li>
+            <li><span class="mark" aria-hidden="true">✓</span><span>あなたがやるのは、現金支出の金額を LINE に送ることだけ</span></li>
+          </ul>
+        </div>
+      </div>
+      <p class="diff-note">口座連携型の家計簿サービスとも違い、金融機関のログイン情報を外部に預けたり、連携切れのたびに再認証したりする必要はありません。使うのは Gmail の読み取り専用権限（gmail.readonly）だけ。取り込んだ家計データは、すべて自分のサーバーの中に残ります。</p>
+    </div>
+  </section>
+
+  <!-- FEATURES -->
+  <section class="features" id="features" aria-labelledby="feat-h">
+    <div class="wrap">
+      <div class="sec-head">
+        <p class="eyebrow">できること</p>
+        <h2 id="feat-h">通知メールから、使える家計データへ。</h2>
+        <p>受信箱に届く利用通知を集計し、毎日の支出を追える形にします。誇張のない、実際にある機能だけを。</p>
+      </div>
+      <div class="cards">
+        <article class="card">
+          <div class="ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 15a2 2 0 0 1-2 2H8l-4 4V5a2 2 0 0 1 2-2h13a2 2 0 0 1 2 2z"/></svg></div>
+          <h3>LINE 自動通知</h3>
+          <p>日次・週次・月次の支出サマリを LINE にプッシュ。現金支出は LINE のトークに金額を送るだけで手入力できます。</p>
+        </article>
+        <article class="card">
+          <div class="ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="4" width="18" height="14" rx="2"/><path d="M3 9h18M8 21h8"/></svg></div>
+          <h3>WebUI で家計管理</h3>
+          <p>ログイン制のダッシュボードで取引一覧を確認・編集。CSV エクスポートと通知時刻の変更もブラウザから。</p>
+        </article>
+        <article class="card">
+          <div class="ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 7v10M9.3 9.2h4a1.9 1.9 0 0 1 0 3.8h-4M9.3 13h4.3"/></svg></div>
+          <h3>外貨決済に対応</h3>
+          <p>外貨の利用は円合計に混ぜず、通貨ごとに分けて集計。海外利用やサブスクの内訳がぶれません。</p>
+        </article>
+        <article class="card">
+          <div class="ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 3v6a3 3 0 0 0 3 3h6a3 3 0 0 0 3-3V3M9 3v3M15 3v3M12 12v9M8 21h8"/></svg></div>
+          <h3>プラグイン式パーサ</h3>
+          <p>カード会社ごとのメール解釈は <code style="font-family:var(--mono);font-size:.85em">parsers/</code> に1ファイル追加するだけ。標準で三井住友カードと JCB の実装例つき。未対応カードは<a href="#request">メールを送ってもらえれば追加対応</a>。</p>
+        </article>
+        <article class="card">
+          <div class="ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 12a9 9 0 1 1-3-6.7M21 4v4h-4"/></svg></div>
+          <h3>自動アップデート</h3>
+          <p>配信元をポーリングして安全に更新。失敗したときは自動でロールバックし、動く状態を保ちます。</p>
+        </article>
+        <article class="card">
+          <div class="ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3l7 3v5c0 4.4-3 7.6-7 9-4-1.4-7-4.6-7-9V6z"/><path d="M9.3 12l1.9 1.9 3.5-3.6"/></svg></div>
+          <h3>セルフホスト＝プライバシー</h3>
+          <p>各自が自分の Google / LINE / サーバーで運用。金融データは自分のサーバー内に残り、他人に預けません。</p>
+        </article>
+      </div>
+    </div>
+  </section>
+
+  <!-- HOW IT WORKS -->
+  <section id="how" aria-labelledby="how-h" style="background:var(--surface-2)">
+    <div class="wrap">
+      <div class="sec-head">
+        <p class="eyebrow">仕組み</p>
+        <h2 id="how-h">受信から通知まで、ひとつの流れで。</h2>
+        <p>裏側で毎日動くのはこの4ステップ。あなたが触るのは最後のLINEとWebUIだけです。</p>
+      </div>
+
+      <div class="diagram" aria-hidden="true">
+        <div class="diagram-row">
+          <div class="dia-stage">
+            <svg class="dia-ico" viewBox="0 0 64 64" fill="none">
+              <rect x="7" y="16" width="42" height="32" rx="4" class="dia-surface" stroke-width="2"/>
+              <path d="M7 18 28 36 49 18" class="dia-ink-line" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+              <circle cx="46" cy="42" r="12" class="dia-accent-fill"/>
+              <text x="46" y="46.5" text-anchor="middle" class="dia-accent-text" font-size="13" font-weight="700">¥</text>
+            </svg>
+            <p class="dia-cap">利用通知メール</p>
+          </div>
+          <span class="dia-arrow" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h13M13 6l6 6-6 6"/></svg></span>
+          <div class="dia-stage">
+            <svg class="dia-ico" viewBox="0 0 64 64" fill="none">
+              <rect x="7" y="8" width="36" height="44" rx="4" class="dia-surface" stroke-width="2"/>
+              <line x1="14" y1="20" x2="36" y2="20" class="dia-line" stroke-width="2" stroke-linecap="round"/>
+              <line x1="14" y1="29" x2="36" y2="29" class="dia-accent-line" stroke-width="2.4" stroke-linecap="round"/>
+              <line x1="14" y1="38" x2="36" y2="38" class="dia-line" stroke-width="2" stroke-linecap="round"/>
+              <circle cx="45" cy="46" r="10" class="dia-surface" stroke-width="2.6"/>
+              <line x1="52.5" y1="53.5" x2="59" y2="60" class="dia-ink-line" stroke-width="2.6" stroke-linecap="round"/>
+            </svg>
+            <p class="dia-cap">パース・集計</p>
+          </div>
+          <span class="dia-arrow" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h13M13 6l6 6-6 6"/></svg></span>
+          <div class="dia-stage">
+            <svg class="dia-ico" viewBox="0 0 64 64" fill="none">
+              <path d="M14 10h30a8 8 0 0 1 8 8v16a8 8 0 0 1-8 8H26l-9 9v-9h-3a8 8 0 0 1-8-8V18a8 8 0 0 1 8-8z" class="dia-surface" stroke-width="2"/>
+              <text x="34" y="33.5" text-anchor="middle" class="dia-ink-text" font-size="9.5" letter-spacing="-0.5" font-weight="700">¥12,480</text>
+              <circle cx="47" cy="14" r="6" class="dia-accent-fill"/>
+            </svg>
+            <p class="dia-cap">LINEにプッシュ</p>
+          </div>
+          <span class="dia-arrow" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h13M13 6l6 6-6 6"/></svg></span>
+          <div class="dia-stage">
+            <svg class="dia-ico" viewBox="0 0 64 64" fill="none">
+              <rect x="6" y="10" width="52" height="40" rx="5" class="dia-surface" stroke-width="2"/>
+              <line x1="6" y1="20" x2="58" y2="20" class="dia-line" stroke-width="2"/>
+              <circle cx="13" cy="15" r="1.7" class="dia-dot"/>
+              <circle cx="19" cy="15" r="1.7" class="dia-dot"/>
+              <circle cx="25" cy="15" r="1.7" class="dia-dot"/>
+              <line x1="13" y1="30" x2="46" y2="30" class="dia-line" stroke-width="1.6" stroke-linecap="round"/>
+              <line x1="13" y1="38" x2="38" y2="38" class="dia-line" stroke-width="1.6" stroke-linecap="round"/>
+              <circle cx="49" cy="41" r="10" class="dia-stamp-ring" stroke-width="2"/>
+              <path d="M44.5 41 47.5 44 53.5 37.5" class="dia-stamp-check" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/>
+            </svg>
+            <p class="dia-cap">WebUIで確認</p>
+          </div>
+        </div>
+      </div>
+
+      <div class="flow">
+        <div class="step">
+          <span class="n"></span>
+          <div class="sico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="5" width="18" height="14" rx="2"/><path d="M3.5 6.5 12 13l8.5-6.5"/></svg></div>
+          <h3>利用通知を取得</h3>
+          <p>Gmail から対象カードの利用通知メールだけを OAuth 経由で安全に読み取ります。</p>
+          <span class="arr" aria-hidden="true"></span>
+        </div>
+        <div class="step">
+          <span class="n"></span>
+          <div class="sico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 7h16M4 12h10M4 17h7"/><path d="M15 15l2.5 2.5L22 13"/></svg></div>
+          <h3>パースして集計</h3>
+          <p>カード別のパーサが金額・日付・店名を抽出。外貨は通貨ごとに分けて日次で集計します。</p>
+          <span class="arr" aria-hidden="true"></span>
+        </div>
+        <div class="step">
+          <span class="n"></span>
+          <div class="sico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 15a2 2 0 0 1-2 2H8l-4 4V5a2 2 0 0 1 2-2h13a2 2 0 0 1 2 2z"/></svg></div>
+          <h3>毎日LINEにプッシュ</h3>
+          <p>設定した時刻にその日のサマリを送信。件数と内訳がひと目でわかります。</p>
+          <span class="arr" aria-hidden="true"></span>
+        </div>
+        <div class="step">
+          <span class="n"></span>
+          <div class="sico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="4" width="18" height="14" rx="2"/><path d="M3 9h18M8 21h8"/></svg></div>
+          <h3>確認 / 現金入力</h3>
+          <p>WebUI で内訳を見直し、CSV に書き出し。現金支出は LINE から金額を送って追加します。</p>
+          <span class="arr" aria-hidden="true"></span>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- SETUP -->
+  <section class="setup" id="setup" aria-labelledby="setup-h">
+    <div class="wrap">
+      <div class="sec-head">
+        <p class="eyebrow">はじめ方</p>
+        <h2 id="setup-h">4ステップで動きはじめる。</h2>
+        <p>自分の環境で動かすツールなので、いくつか自分で用意するものがあります。各ステップの詳細は README に。</p>
+      </div>
+
+      <div class="specs">
+        <p class="specs-note">常時起動はしますが、実際の処理は1日数回のメール取得とLINE送信だけ。データベースは使わず軽量な JSON ファイルに保存するので、必要なスペックは控えめです。目安は以下のとおりです。</p>
+        <div class="specs-scroll">
+          <table>
+            <thead>
+              <tr>
+                <th scope="col">項目</th>
+                <th scope="col">オンプレミス（自宅サーバー・VPS）</th>
+                <th scope="col">AWS</th>
+                <th scope="col">Oracle Cloud（Always Free）</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <th scope="row">CPU</th>
+                <td>1 vCPU（x86_64 / ARM64 どちらでも可）</td>
+                <td><code>t4g.micro</code>（Arm, 2 vCPU）または <code>t3.micro</code>（x86, 2 vCPU）</td>
+                <td>Ampere A1（Arm, 最大4 OCPU）または <code>VM.Standard.E2.1.Micro</code>（x86）のいずれも無料枠内</td>
+              </tr>
+              <tr>
+                <th scope="row">メモリ</th>
+                <td>1GB 以上（512MB でも動作しますが余裕を見て推奨）</td>
+                <td>1GB（上記インスタンスタイプに標準搭載）</td>
+                <td>1GB〜（Ampere A1 は無料枠のまま最大24GBまで割当可能）</td>
+              </tr>
+              <tr>
+                <th scope="row">ディスク</th>
+                <td>空き 5GB 以上</td>
+                <td>EBS gp3 8GB 程度</td>
+                <td>ブロックボリューム 50GB 程度（無料枠 200GB の範囲内）</td>
+              </tr>
+              <tr>
+                <th scope="row">OS</th>
+                <td>Linux（Debian / Ubuntu 系推奨）・systemd 必須</td>
+                <td>Ubuntu Server AMI または Amazon Linux 2023</td>
+                <td>Ubuntu（Arm/x86 両対応イメージ）</td>
+              </tr>
+              <tr>
+                <th scope="row">ネットワーク</th>
+                <td>固定 IP または DDNS、443/80 番ポートを開放、独自ドメイン</td>
+                <td>Elastic IP を1つ割り当て、セキュリティグループで 443/80 を開放（22 は管理者 IP のみに限定）</td>
+                <td>パブリック IP は標準付与。セキュリティリスト（クラウド側）とインスタンス内 iptables/firewalld（OS側）の<strong>両方</strong>で 443/80 を開放する必要あり</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+        <p class="specs-foot">いずれの環境でも、Gmail・LINE との通信および証明書更新のために<strong>常時インターネット接続</strong>が必要です。AWS では固定月額プランの Lightsail でも同程度のスペックで問題なく動作します。Oracle Cloud の Always Free は無料枠のまま永続利用でき、本アプリの依存パッケージはいずれも Arm64（Ampere A1）向けの配布がありインストールに支障ありません。</p>
+      </div>
+
+      <div class="steps">
+        <div class="srow">
+          <div class="idx" aria-hidden="true"></div>
+          <div>
+            <h3>サーバーを用意</h3>
+            <p>インターネットに常時接続された Linux サーバー（Python 3.10+）と、HTTPS 終端できるリバースプロキシ。LINE Webhook は HTTPS が必須です。</p>
+          </div>
+        </div>
+        <div class="srow">
+          <div class="idx" aria-hidden="true"></div>
+          <div>
+            <h3>Google と LINE を連携</h3>
+            <p>Google Cloud で Gmail API の OAuth を設定し、LINE Messaging API のチャンネルを作成。トークンを控えておきます。</p>
+          </div>
+        </div>
+        <div class="srow">
+          <div class="idx" aria-hidden="true"></div>
+          <div>
+            <h3>セットアップを実行</h3>
+            <p><code>install.sh</code> または <code>python setup.py</code> の対話ウィザードで、パスワード・トークン・鍵を設定して <code>.env</code> を生成します。</p>
+          </div>
+        </div>
+        <div class="srow">
+          <div class="idx" aria-hidden="true"></div>
+          <div>
+            <h3>通知時刻を設定</h3>
+            <p>WebUI にログインし、日次通知の時刻を指定。あとは毎朝、支出サマリが LINE に届きます。</p>
+          </div>
+        </div>
+      </div>
+      <p class="setup-cta">nginx / systemd / cron の具体的な設定を含む詳細な手順は <a href="./README.md">README</a> にまとめています。</p>
+    </div>
+  </section>
+
+  <!-- PARSER REQUEST（未対応カードの追加依頼） -->
+  <section id="request" aria-labelledby="req-h">
+    <div class="wrap">
+      <div class="req-box">
+        <p class="eyebrow">未対応カードの追加</p>
+        <h2 id="req-h">あなたのカードも、追加対応します。</h2>
+        <p>標準対応（三井住友カード・JCB）以外のカードでも、利用通知メールの<strong>本文（テキスト）またはスクリーンショット</strong>を送ってもらえれば、パーサを追加して対応します。金額・日付・利用先の書式がわかれば十分です。</p>
+        <p><strong>送る前に、カード番号・氏名などの個人情報は必ず伏せて（塗りつぶして）ください。</strong></p>
+        <a class="btn-mail" id="reqMail" href="#request">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="2" y="4" width="20" height="16" rx="2"/><path d="m22 7-10 6L2 7"/></svg>
+          メールで送る<span class="addr" id="reqAddr"></span>
+        </a>
+        <p class="req-note">本文を貼り付けるか、スクリーンショットを添付してそのまま送信してください。対応後は自動アップデート経由で全インストールに配信されます。</p>
+      </div>
+    </div>
+  </section>
+
+  <!-- FAQ -->
+  <section id="faq" aria-labelledby="faq-h">
+    <div class="wrap">
+      <div class="sec-head">
+        <p class="eyebrow">FAQ</p>
+        <h2 id="faq-h">先に知っておきたいこと。</h2>
+        <p>セルフホストならではの前提と落とし穴を、正直に書いておきます。</p>
+      </div>
+      <div class="faq">
+        <details>
+          <summary>自分で用意するものは？<span class="pm" aria-hidden="true"></span></summary>
+          <p class="a"><strong>常時インターネットに接続された</strong> Linux サーバー、Google Cloud の OAuth 設定（Gmail API）、そして LINE Messaging API のチャンネルの3つです。いずれもあなた自身のアカウントで用意します。運用はすべて自分のサーバー内で完結します。オンプレミス・AWS それぞれの推奨スペックは <a href="#setup">セットアップの節</a> にまとめています。</p>
+        </details>
+        <details>
+          <summary>通知が数日で止まってしまいます<span class="pm" aria-hidden="true"></span></summary>
+          <p class="a">Google の OAuth 同意画面を<strong>「テスト中」のまま</strong>にしていると、Gmail の refresh token が<strong>約7日で失効</strong>し、通知が静かに止まります。長期運用では同意画面を<strong>「本番」に切り替える</strong>のが必須です。詳細は README のセットアップ節を参照してください。</p>
+        </details>
+        <details>
+          <summary>対応しているカードは？<span class="pm" aria-hidden="true"></span></summary>
+          <p class="a">標準では<strong>三井住友カード</strong>と<strong>JCB</strong>の実装例が同梱されています。他社カードや銀行に対応するには、<code>parsers/</code> にパーサを1ファイル追加します。自分で書かなくても、<a href="#request">利用通知メールの本文かスクリーンショットを送ってもらえれば追加対応します</a>（個人情報は伏せて送ってください）。</p>
+        </details>
+        <details>
+          <summary>データはどこに保存される？<span class="pm" aria-hidden="true"></span></summary>
+          <p class="a">取引履歴も認証情報も、<strong>あなたのサーバー内</strong>にだけ保存されます。card-notify に外部へデータを送る仕組みはありません。他人にデータを預けたくない人のための設計です。</p>
+        </details>
+        <details>
+          <summary>更新はどうなりますか？<span class="pm" aria-hidden="true"></span></summary>
+          <p class="a">配信元をポーリングして自動で更新できます。更新に失敗した場合は自動でロールバックし、直前の動く状態に戻します。</p>
+        </details>
+        <details>
+          <summary>ライセンスと保証は？<span class="pm" aria-hidden="true"></span></summary>
+          <p class="a"><strong>MIT ライセンス・無保証</strong>です。自分の受信箱と金融情報を扱うツールなので、内容を理解したうえで自己責任で運用してください。<code>.env</code> や認証ファイルは公開リポジトリにコミットしないよう注意してください。</p>
+        </details>
+        <details>
+          <summary>アンインストールしたい場合は？<span class="pm" aria-hidden="true"></span></summary>
+          <p class="a">専用の <code>uninstall.sh</code> を用意しています。サーバー上で <code>curl -fsSL https://card-notify.yama3394.uk/uninstall.sh -o uninstall.sh &amp;&amp; sudo bash uninstall.sh</code> を実行すると、systemd サービス・専用ユーザー・アプリ本体（<code>/opt/card-notify</code>）を削除します。</p>
+          <p class="a">既定では取引データ・LINE/Gmail 連携情報・WebUI パスワードが入った <code>/var/lib/card-notify</code> は誤削除防止のため<strong>保持されます</strong>。完全に削除したい場合は <code>sudo PURGE_DATA=true bash uninstall.sh</code> を実行するか、<code>/var/lib/card-notify</code> を手動で削除してください。</p>
+        </details>
+      </div>
+    </div>
+  </section>
+</main>
+
+<footer class="site">
+  <div class="wrap">
+    <div class="foot-top">
+      <div class="foot-brand">
+        <a class="brand" href="#top" aria-label="card-notify ホーム">
+          <svg class="mark" viewBox="0 0 32 32" fill="none" aria-hidden="true">
+            <rect x="1.5" y="1.5" width="29" height="29" rx="8.5"/>
+            <path d="M8.5 21.5c0-4 0-6 1.4-7.4C11.3 12.7 13 12.7 16 12.7s4.7 0 6.1 1.4c1.4 1.4 1.4 3.4 1.4 7.4" stroke-width="1.8" stroke-linecap="round"/>
+            <path d="M11.5 11.5 16 16l4.5-4.5" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
+            <path d="M16 16.2v5.3M13.4 18.1h5.2M13.4 20.4h5.2" stroke-width="1.7" stroke-linecap="round"/>
+          </svg>
+          <span>card-notify</span>
+        </a>
+        <p>カードの利用通知メールから、毎日の支出サマリを LINE に届けるセルフホスト型の家計管理ツール。</p>
+      </div>
+      <nav aria-label="フッター">
+        <a href="#features" style="color:var(--muted);font-size:.86rem;display:block;margin-bottom:8px;font-weight:600">特徴</a>
+        <a href="#how" style="color:var(--muted);font-size:.86rem;display:block;margin-bottom:8px;font-weight:600">仕組み</a>
+        <a href="#setup" style="color:var(--muted);font-size:.86rem;display:block;margin-bottom:8px;font-weight:600">セットアップ</a>
+        <a href="/news" style="color:var(--muted);font-size:.86rem;display:block;font-weight:600">お知らせ</a>
+        <a href="./README.md" style="color:var(--muted);font-size:.86rem;display:block;font-weight:600">README</a>
+      </nav>
+    </div>
+    <div class="disc">
+      <p class="lic">MIT ライセンス・無保証（AS IS）。各自が自分の Google / LINE / サーバーで運用するセルフホスト型ツールです。</p>
+      <p>Not affiliated with, endorsed by, or sponsored by 三井住友カード / JCB / LINE / Google. 各社の名称・商標は各権利者に帰属します。card-notify はこれらの公式サービスではありません。</p>
+    </div>
+  </div>
+</footer>
+
+<script data-cfasync="false">
+  (function () {
+    var root = document.documentElement;
+    var KEY = "cn-theme";
+    try {
+      var saved = localStorage.getItem(KEY);
+      if (saved === "light" || saved === "dark") root.setAttribute("data-theme", saved);
+    } catch (e) {}
+
+    var toggle = document.getElementById("themeToggle");
+    function current() {
+      var attr = root.getAttribute("data-theme");
+      if (attr) return attr;
+      return window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light";
+    }
+    toggle.addEventListener("click", function () {
+      var next = current() === "dark" ? "light" : "dark";
+      root.setAttribute("data-theme", next);
+      try { localStorage.setItem(KEY, next); } catch (e) {}
+    });
+
+    var btn = document.getElementById("copyBtn");
+    var label = document.getElementById("copyLabel");
+    // 問い合わせ先（収集ボット対策で分割保持。差し替えはこの2行だけ）
+    var CONTACT_USER = "yama";
+    var CONTACT_DOMAIN = "winmirei.com";
+    (function () {
+      var a = document.getElementById("reqMail");
+      if (!a) return;
+      if (CONTACT_USER.indexOf("REPLACE_") === 0) { a.style.display = "none"; return; } // 未設定ならボタンを出さない
+      var addr = CONTACT_USER + "@" + CONTACT_DOMAIN;
+      a.href = "mailto:" + addr
+        + "?subject=" + encodeURIComponent("[card-notify] パーサ追加希望")
+        + "&body=" + encodeURIComponent("カード会社名：\n（以下に利用通知メールの本文を貼り付けるか、スクリーンショットを添付してください。カード番号・氏名などは伏せてください）\n");
+      var s = document.getElementById("reqAddr");
+      if (s) s.textContent = addr;
+    })();
+
+    // 最新のお知らせ（/news.json）。取得できない/0件でも静かにフォールバックする。
+    (function () {
+      var box = document.getElementById("newsItems");
+      if (!box) return;
+      fetch("/news.json?limit=3").then(function (r) {
+        if (!r.ok) throw new Error("news fetch failed");
+        return r.json();
+      }).then(function (posts) {
+        if (!posts || posts.length === 0) {
+          box.innerHTML = '<p class="news-empty">まだお知らせはありません。</p>';
+          return;
+        }
+        var esc = function (s) {
+          return String(s).replace(/[&<>"']/g, function (c) {
+            return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c];
+          });
+        };
+        box.innerHTML = posts.map(function (p) {
+          return '<div class="news-item"><time>' + esc(p.date) + '</time>'
+            + '<a href="/news/' + encodeURIComponent(p.id) + '">' + esc(p.title) + '</a></div>';
+        }).join("");
+      }).catch(function () {
+        box.innerHTML = '<p class="news-empty"><a href="/news">お知らせを見る →</a></p>';
+      });
+    })();
+
+    var cmd = "curl -fsSL https://card-notify.yama3394.uk/install.sh | bash";
+    btn.addEventListener("click", function () {
+      function done() { label.textContent = "コピーしました"; setTimeout(function () { label.textContent = "コピー"; }, 1800); }
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        navigator.clipboard.writeText(cmd).then(done).catch(fallback);
+      } else { fallback(); }
+      function fallback() {
+        var t = document.createElement("textarea");
+        t.value = cmd; t.setAttribute("readonly", ""); t.style.position = "absolute"; t.style.left = "-9999px";
+        document.body.appendChild(t); t.select();
+        try { document.execCommand("copy"); done(); } catch (e) { label.textContent = "コピー失敗"; }
+        document.body.removeChild(t);
+      }
+    });
+  })();
+</script>

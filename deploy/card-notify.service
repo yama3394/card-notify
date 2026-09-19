@@ -1,0 +1,29 @@
+# /etc/systemd/system/card-notify.service
+# 非 root 専用ユーザーで動かす（User を実在ユーザーに置き換える）。
+# 秘密は EnvironmentFile ではなく CARD_NOTIFY_ENV_FILE 経由で読む（config.py が解決）。
+[Unit]
+Description=card-notify (LINE Webhook + WebUI)
+After=network.target
+
+[Service]
+Type=simple
+User=REPLACE_WITH_SERVICE_USER
+Group=REPLACE_WITH_SERVICE_USER
+WorkingDirectory=/opt/card-notify
+Environment=CARD_NOTIFY_ENV_FILE=/var/lib/card-notify/card-notify.env
+Environment=CARD_NOTIFY_DATA_DIR=/var/lib/card-notify
+Environment=PYTHONUNBUFFERED=1
+Environment=TZ=Asia/Tokyo
+ExecStart=/opt/card-notify/.venv/bin/python app.py
+Restart=on-failure
+RestartSec=5
+
+# 最小権限化（データ保存先だけ書き込み許可）
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/lib/card-notify
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target

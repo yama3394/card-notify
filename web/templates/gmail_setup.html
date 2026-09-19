@@ -1,0 +1,66 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="card">
+  <h2>Gmail連携（オプション）</h2>
+  {% if error %}
+  <p style="color:#c00;margin-bottom:10px;font-size:13px">{{ error }}</p>
+  {% endif %}
+
+  {% if not credentials_exists %}
+  <p class="sub" style="margin-bottom:10px">
+    カード利用通知メールを Gmail から自動取得したい場合は、Google Cloud Console で
+    OAuth クライアントを用意してください（省略してダッシュボードへ進むこともできます）。
+  </p>
+  <ol class="sub" style="margin:0 0 12px 18px">
+    <li>Google Cloud でプロジェクトを作成し、Gmail API を有効化する。</li>
+    <li>OAuth 同意画面を設定し、自分を<strong>テストユーザー</strong>に追加する。</li>
+    <li>認証情報で <strong>OAuth クライアント ID（デスクトップ）</strong> を作成し、
+      <code>credentials.json</code> をダウンロードする。</li>
+  </ol>
+  <p class="sub" style="margin-bottom:6px;color:#c00">
+    ⚠️ OAuth 同意画面が「テスト中」ステータスのままだと、Gmail の refresh token は
+    約7日で失効し、通知が静かに止まります。自分専用で使う場合は本番モードへの
+    切り替えを強くおすすめします:
+  </p>
+  <ol class="sub" style="margin:0 0 12px 18px">
+    <li>Google Cloud Console →「APIとサービス」→「OAuth 同意画面」を開く。</li>
+    <li>公開ステータスの「アプリを公開」を押し、<strong>「本番環境」</strong>に切り替える
+      （Google の審査は不要。確認画面はそのまま確定してよい）。</li>
+    <li>切り替え後の認証時に「このアプリは Google で確認していません」という警告が
+      出ますが、<strong>自分で作成した自分専用のアプリ</strong>なので「詳細」→
+      「（安全でないページに）移動」で進んで問題ありません。</li>
+  </ol>
+  <form method="post" action="/setup/gmail/credentials" enctype="multipart/form-data">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    <p class="sub" style="margin-bottom:6px">ダウンロードした credentials.json をアップロードしてください。</p>
+    <input type="file" name="credentials_file" accept="application/json,.json" required style="margin-bottom:10px">
+    <button type="submit">アップロード</button>
+  </form>
+
+  {% elif auth_url %}
+  <p class="sub" style="margin-bottom:12px">
+    下のリンクから Google の認証画面を開き、アクセスを許可してください（別タブで開きます）。
+    「このアプリは Google で確認していません」という警告が出た場合は、自分で作成した
+    自分専用のアプリなので「詳細」→「（安全でないページに）移動」で進んでください。
+  </p>
+  <p style="margin-bottom:12px">
+    <a href="{{ auth_url }}" target="_blank" rel="noopener noreferrer">Google で許可する</a>
+  </p>
+  <p class="sub" style="margin-bottom:12px">
+    許可すると、ブラウザは <code>http://localhost/...</code> というURLへ移動しようとして
+    「このサイトにアクセスできません」のようなエラーになりますが、これは想定どおりです。
+    アドレスバーに表示された URL 全体をコピーして、下に貼り付けてください。
+  </p>
+  <form method="post" action="/setup/gmail/exchange">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    <input type="text" name="redirect_url" placeholder="http://localhost/?code=..."
+           required style="margin-bottom:10px">
+    <button type="submit">認証を完了</button>
+  </form>
+  {% endif %}
+
+  <p class="sub" style="margin-top:14px">
+    <a href="/setup/gmail/skip">後で設定してダッシュボードへ進む</a>
+  </p>
+</div>
+{% endblock %}
