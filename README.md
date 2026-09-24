@@ -39,10 +39,9 @@
 AWS では固定月額プランの Lightsail でも同程度のスペックで問題なく動作する。
 
 ## かんたんインストール（配布版）
-配信元を用意している場合は、ワンライナーで導入できる（専用ユーザー作成・venv・
-依存導入・systemd 登録まで自動。対話的なウィザードはここでは実行しない）:
+公式の配信元からワンライナーで導入できる。専用ユーザー作成・venv 作成・依存パッケージ導入・systemd 登録までを自動で行う。初期設定（パスワードやトークンの入力）はインストール後に Web のセットアップウィザードで行う:
 ```bash
-curl -fsSL https://card-notify.yama3394.uk/install.sh | bash
+curl -fsSL https://card-notify.yama3394.uk/install.sh | sudo bash
 ```
 フォークして自分で配信する場合は `install.sh` 冒頭の `FEED_URL` を差し替える。
 cron の設定は不要（通知はアプリ内スケジューラが実行）。
