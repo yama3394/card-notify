@@ -648,6 +648,23 @@ def settings_notify_time():
     return f'<p style="color:green">✅ 通知時刻を {hour:02d}:{minute:02d} に変更しました</p>'
 
 
+def _delete_transaction(data: dict, tx_id: str) -> None:
+    """取引を1件削除する。メール由来の取引は元メールの id を skipped_ids に積む。
+
+    積まないと、Gmail の取得窓にそのメールが残っている間は次回の取得で
+    「未処理」として再登録され、削除した取引が復活してしまう。1通に複数取引が
+    入るメールの2件目以降は id が "{msg_id}#2" の形なので "#" より前を使う。
+    """
+    removed = [t for t in data["transactions"] if t["id"] == tx_id]
+    data["transactions"] = [t for t in data["transactions"] if t["id"] != tx_id]
+    for t in removed:
+        if t.get("type") == "cash":
+            continue
+        msg_id = str(t["id"]).split("#")[0]
+        if msg_id not in data["skipped_ids"]:
+            data["skipped_ids"].append(msg_id)
+
+
 # ── Cash ───────────────────────────────────────────────────────────────────────
 
 @app.route("/cash")
@@ -665,10 +682,7 @@ def cash_delete():
         return '<p style="color:red">CSRFエラー</p>', 403
     tx_id = request.form.get("id", "")
 
-    def _delete(data):
-        data["transactions"] = [t for t in data["transactions"] if t["id"] != tx_id]
-
-    storage.update_history(_delete)
+    storage.update_history(lambda data: _delete_transaction(data, tx_id))
     return ""
 
 
@@ -726,10 +740,7 @@ def errors_delete():
         return '<p style="color:red">CSRFエラー</p>', 403
     tx_id = request.form.get("id", "")
 
-    def _delete(data):
-        data["transactions"] = [t for t in data["transactions"] if t["id"] != tx_id]
-
-    storage.update_history(_delete)
+    storage.update_history(lambda data: _delete_transaction(data, tx_id))
     return ""
 
 
@@ -856,10 +867,7 @@ def transaction_delete():
         return '<p style="color:red">CSRFエラー</p>', 403
     tx_id = request.form.get("id", "")
 
-    def _delete(data):
-        data["transactions"] = [t for t in data["transactions"] if t["id"] != tx_id]
-
-    storage.update_history(_delete)
+    storage.update_history(lambda data: _delete_transaction(data, tx_id))
     return ""
 
 

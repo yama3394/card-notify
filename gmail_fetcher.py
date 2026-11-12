@@ -195,82 +195,110 @@ def fetch_for_parser(parser, after_date: str) -> int:
             continue
 
         raw = service.users().messages().get(userId="me", id=msg_id, format="raw").execute()
-        msg = _email.message_from_bytes(
-            base64.urlsafe_b64decode(raw["raw"]), policy=_email.policy.default
-        )
-        subject = msg.get("Subject", "")
+        # 解釈は1通ずつ例外を隔離する。未知の文字コード等で1通が失敗しただけで
+        # 取得全体を失敗扱いにすると、last_fetched_date が進まず同じメールで毎回
+        # 失敗し続け、日次通知が止まったままになる。失敗したメールは skipped に
+        # 積んで /errors 画面で手動登録できるようにする（通信エラーは対象外で、
+        # 上の get() の例外はそのまま呼び出し側の再試行に委ねる）。
+        msg = None
+        subject = ""
+        try:
+            msg = _email.message_from_bytes(
+                base64.urlsafe_b64decode(raw["raw"]), policy=_email.policy.default
+            )
+            subject = msg.get("Subject", "")
 
-        # 件名が対象条件に合わない/明示的に対象外なメールは、二度と再処理しない
-        # よう skipped_ids に永続化する（そうしないと同じメールが Gmail の取得窓
-        # の重なりで毎日再度現れ、そのたびに誤判定や重複ログの元になる）。
-        if parser.subject_contains and parser.subject_contains not in subject:
-            new_skipped.append(msg_id)
+            # 件名が対象条件に合わない/明示的に対象外なメールは、二度と再処理しない
+            # よう skipped_ids に永続化する（そうしないと同じメールが Gmail の取得窓
+            # の重なりで毎日再度現れ、そのたびに誤判定や重複ログの元になる）。
+            if parser.subject_contains and parser.subject_contains not in subject:
+                new_skipped.append(msg_id)
+                existing_ids.add(msg_id)
+                continue
+
+            if parser.ignore_subjects and any(s in subject for s in parser.ignore_subjects):
+                logger.info(f"件名により対象外: msg_id={msg_id} subject={subject!r}")
+                new_skipped.append(msg_id)
+                existing_ids.add(msg_id)
+                continue
+
+            text = _extract_body(msg)
+
+            if parser.is_cancellation(text):
+                r = parser.parse(text)
+                if r:
+                    cancellations.append((r.store, r.amount, r.currency, r.date))
+                else:
+                    logger.warning(f"取消メールを解釈できません: msg_id={msg_id}")
+                new_skipped.append(msg_id)
+                existing_ids.add(msg_id)
+                continue
+
+            if parser.is_ignorable(text):
+                logger.info(f"スキップ: msg_id={msg_id}")
+                new_skipped.append(msg_id)
+                existing_ids.add(msg_id)
+                continue
+
+            results = parser.parse_all(text)
+            if not results:
+                logger.warning(f"金額を抽出できませんでした（要手動確認）: msg_id={msg_id}")
+                new_skipped.append(msg_id)
+                new_skipped_meta.append({
+                    "id": msg_id,
+                    "type": parser.key,
+                    "date": _msg_date_jst(msg),
+                    "subject": subject,
+                    "reason": "no_amount",
+                })
+                existing_ids.add(msg_id)
+                continue
+
+            # 1通に複数取引が入る形式（JCB「売上到着分」等）は2件目以降を
+            # "{msg_id}#2", "#3"... とする。重複判定(existing_ids)は元の msg_id
+            # ベースのまま（1件目の id が msg_id と一致するので次回実行時も拾える）。
+            txs: list[dict] = []
+            for i, r in enumerate(results):
+                tx_id = msg_id if i == 0 else f"{msg_id}#{i + 1}"
+                # 存在しない日付（13月45日等）は集計・遅延判定で例外になるため登録しない
+                datetime.strptime(r.date, "%Y-%m-%d")
+                if r.store is None:
+                    logger.warning(f"店舗名を抽出できませんでした: msg_id={tx_id}")
+
+                transaction = {
+                    "id": tx_id,
+                    "date": r.date,
+                    "amount": r.amount,
+                    "type": parser.key,
+                    "store": r.store,
+                    "currency": r.currency,
+                }
+                if r.store is None:
+                    # /errors 画面で本文を確認しながら手動で店舗名を確定できるようにする
+                    transaction["raw_text"] = text[:1500]
+                txs.append(transaction)
+                disp = f"¥{r.amount:,}" if r.currency == "JPY" else f"{r.amount:,} {r.currency}"
+                logger.info(f"登録: {parser.key} {disp} {r.store} {r.date}")
+
+            # 全件を解釈できてからまとめて積む（途中で失敗したメールを半端に登録しない）
+            new_transactions.extend(txs)
+            new_count += len(txs)
             existing_ids.add(msg_id)
-            continue
-
-        if parser.ignore_subjects and any(s in subject for s in parser.ignore_subjects):
-            logger.info(f"件名により対象外: msg_id={msg_id} subject={subject!r}")
-            new_skipped.append(msg_id)
-            existing_ids.add(msg_id)
-            continue
-
-        text = _extract_body(msg)
-
-        if parser.is_cancellation(text):
-            r = parser.parse(text)
-            if r:
-                cancellations.append((r.store, r.amount, r.currency, r.date))
-            else:
-                logger.warning(f"取消メールを解釈できません: msg_id={msg_id}")
-            new_skipped.append(msg_id)
-            existing_ids.add(msg_id)
-            continue
-
-        if parser.is_ignorable(text):
-            logger.info(f"スキップ: msg_id={msg_id}")
-            new_skipped.append(msg_id)
-            existing_ids.add(msg_id)
-            continue
-
-        results = parser.parse_all(text)
-        if not results:
-            logger.warning(f"金額を抽出できませんでした（要手動確認）: msg_id={msg_id}")
+        except Exception:
+            logger.exception(f"メールを解釈できませんでした（要手動確認）: msg_id={msg_id}")
+            try:
+                skipped_date = _msg_date_jst(msg) if msg is not None else None
+            except Exception:
+                skipped_date = None
             new_skipped.append(msg_id)
             new_skipped_meta.append({
                 "id": msg_id,
                 "type": parser.key,
-                "date": _msg_date_jst(msg),
-                "subject": subject,
-                "reason": "no_amount",
+                "date": skipped_date or datetime.now(JST).strftime("%Y-%m-%d"),
+                "subject": str(subject) or "（件名を取得できません）",
+                "reason": "parse_error",
             })
             existing_ids.add(msg_id)
-            continue
-
-        # 1通に複数取引が入る形式（JCB「売上到着分」等）は2件目以降を
-        # "{msg_id}#2", "#3"... とする。重複判定(existing_ids)は元の msg_id
-        # ベースのまま（1件目の id が msg_id と一致するので次回実行時も拾える）。
-        for i, r in enumerate(results):
-            tx_id = msg_id if i == 0 else f"{msg_id}#{i + 1}"
-            if r.store is None:
-                logger.warning(f"店舗名を抽出できませんでした: msg_id={tx_id}")
-
-            transaction = {
-                "id": tx_id,
-                "date": r.date,
-                "amount": r.amount,
-                "type": parser.key,
-                "store": r.store,
-                "currency": r.currency,
-            }
-            if r.store is None:
-                # /errors 画面で本文を確認しながら手動で店舗名を確定できるようにする
-                transaction["raw_text"] = text[:1500]
-            new_transactions.append(transaction)
-            new_count += 1
-            disp = f"¥{r.amount:,}" if r.currency == "JPY" else f"{r.amount:,} {r.currency}"
-            logger.info(f"登録: {parser.key} {disp} {r.store} {r.date}")
-
-        existing_ids.add(msg_id)
 
     def _merge(history: dict) -> None:
         history["transactions"].extend(new_transactions)
@@ -301,6 +329,11 @@ def fetch_for_parser(parser, after_date: str) -> int:
 
 def fetch_all() -> int:
     """登録済みの全パーサを回して取得する。"""
+    # Gmail 未連携（/setup/gmail をスキップ）でも現金入力だけで日次・週次・月次の
+    # 通知は送る。取得失敗として扱うと main.run() が毎回 False になり通知が止まる。
+    if not config.TOKEN_FILE.exists():
+        logger.info("Gmail 未連携（token.json なし）のためメール取得をスキップします")
+        return 0
     after_date = _get_fetch_after_date()
     logger.info(f"メール取得範囲: {after_date} 以降")
     total = 0
