@@ -141,6 +141,21 @@ def _notify_fetch_error_once(notifier, message: str) -> None:
     _mark_state("last_fetch_error_date", today)
 
 
+def _notify_error_once(notifier, kind: str, message: str) -> None:
+    """集計・日次・月次・週次の失敗通知を、種類（kind）ごとに1日1回へ抑制する。
+
+    _notify_fetch_error_once と同じ理由。データ起因など直すまで毎回同じ場所で
+    落ちる失敗では、再試行のたびに通知すると同じエラーが 15 分おきに届き続ける。
+    """
+    today = datetime.now(JST).strftime("%Y-%m-%d")
+    key = f"last_{kind}_error_date"
+    if _state.load().get(key) == today:
+        logger.info("本日分の失敗通知（%s）は送信済みのため通知をスキップ", kind)
+        return
+    notifier.notify_error(message)
+    _mark_state(key, today)
+
+
 def run() -> bool:
     """日次処理を実行し、その日に送るべき通知がすべて送信済みなら True を返す。
 
@@ -170,7 +185,7 @@ def run() -> bool:
         data = analyzer.analyze()
     except Exception as e:
         logger.error(f"集計失敗: {e}")
-        notifier.notify_error(f"集計失敗: {e}")
+        _notify_error_once(notifier, "analyze", f"集計失敗: {e}")
         return False
 
     ok = True
@@ -187,7 +202,7 @@ def run() -> bool:
             _mark_notified()
         except Exception as e:
             logger.error(f"日次通知失敗: {e}")
-            notifier.notify_error(f"日次通知失敗: {e}")
+            _notify_error_once(notifier, "daily", f"日次通知失敗: {e}")
             _restore_pending_notices(notices)
             ok = False
 
@@ -205,7 +220,7 @@ def run() -> bool:
                 _mark_state("last_monthly", month_key)
             except Exception as e:
                 logger.error(f"月次レポート失敗: {e}")
-                notifier.notify_error(f"月次レポート失敗: {e}")
+                _notify_error_once(notifier, "monthly", f"月次レポート失敗: {e}")
                 ok = False
 
     if today.weekday() in _WEEKLY_CATCHUP_WEEKDAYS:
@@ -219,7 +234,7 @@ def run() -> bool:
                 _mark_state("last_weekly", week_key)
             except Exception as e:
                 logger.error(f"週次レポート失敗: {e}")
-                notifier.notify_error(f"週次レポート失敗: {e}")
+                _notify_error_once(notifier, "weekly", f"週次レポート失敗: {e}")
                 ok = False
 
     return ok

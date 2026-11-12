@@ -504,3 +504,104 @@ class TestFetchForParserMultiTransaction:
         assert new_count2 == 0
         h2 = gmail_fetcher.load_history()
         assert len(h2["transactions"]) == 2
+
+
+class TestFetchAllWithoutGmail:
+    """Gmail 未連携（token.json なし）は取得失敗ではなく「取得なし」として扱う。"""
+
+    def test_returns_zero_without_touching_gmail(self, tmp_path, monkeypatch):
+        _use_tmp_files(monkeypatch, tmp_path)
+        monkeypatch.setattr(config, "TOKEN_FILE", tmp_path / "token.json")
+
+        def _must_not_be_called():
+            raise AssertionError("Gmail に接続してはいけない")
+
+        monkeypatch.setattr(gmail_fetcher, "_get_gmail_service", _must_not_be_called)
+
+        assert gmail_fetcher.fetch_all() == 0
+        # 取得していないので last_fetched_date は進めない（連携後に 30 日分を取り込むため）
+        assert "last_fetched_date" not in _state.load()
+
+
+class TestUnparseableMailIsIsolated:
+    """1通の解釈失敗で取得全体を失敗させない（同じメールで毎回止まり続けるのを防ぐ）。"""
+
+    _GOOD = "◇利用日：2026/01/10\n◇利用先：GOOD STORE\n◇利用取引：買物\n◇利用金額：1,200円\n"
+
+    def _fetch(self, monkeypatch, tmp_path, raws):
+        _use_tmp_files(monkeypatch, tmp_path)
+        monkeypatch.setattr(gmail_fetcher, "_get_gmail_service", lambda: _FakeGmailService(raws))
+        count = gmail_fetcher.fetch_for_parser(parsers.get("smcc"), "2026/01/01")
+        return count, gmail_fetcher.load_history()
+
+    def test_unknown_charset_mail_is_skipped_and_others_registered(self, tmp_path, monkeypatch):
+        bad = base64.urlsafe_b64encode(
+            b"Subject: bad mail\nFrom: statement@vpass.ne.jp\n"
+            b"Content-Type: text/plain; charset=x-unknown-enc\n\nabc\n"
+        ).decode()
+        good = _raw_b64("ご利用のお知らせ", "statement@vpass.ne.jp", self._GOOD)
+
+        count, history = self._fetch(monkeypatch, tmp_path, {"bad1": bad, "good1": good})
+
+        assert count == 1
+        assert [t["id"] for t in history["transactions"]] == ["good1"]
+        # 二度と再処理されず、/errors 画面で手動登録できる
+        assert "bad1" in history["skipped_ids"]
+        assert [(s["id"], s["reason"], s["subject"]) for s in history["skipped"]] == [
+            ("bad1", "parse_error", "bad mail")
+        ]
+
+    def test_nonexistent_date_is_not_registered(self, tmp_path, monkeypatch):
+        body = self._GOOD.replace("2026/01/10", "2026/13/45")
+        raws = {"m1": _raw_b64("ご利用のお知らせ", "statement@vpass.ne.jp", body)}
+
+        count, history = self._fetch(monkeypatch, tmp_path, raws)
+
+        assert count == 0
+        assert history["transactions"] == []
+        assert [s["id"] for s in history["skipped"]] == ["m1"]
+
+
+class TestCancellationWithoutStore:
+    """取消メールから店舗名が取れなかった場合、候補が1件に定まるときだけ削除する。"""
+
+    @staticmethod
+    def _history():
+        return {
+            "transactions": [
+                {"id": "a", "date": "2026-11-01", "amount": 500, "type": "smcc", "store": "A", "currency": "JPY"},
+                {"id": "b", "date": "2026-11-05", "amount": 500, "type": "smcc", "store": "B", "currency": "JPY"},
+            ],
+            "skipped_ids": [],
+        }
+
+    def test_ambiguous_candidates_are_left_untouched(self):
+        history = self._history()
+        removed = gmail_fetcher._remove_matching_transaction(
+            history, "smcc", None, 500, "JPY", "2026-11-12")
+        assert removed is False
+        assert [t["id"] for t in history["transactions"]] == ["a", "b"]
+        assert history["skipped_ids"] == []
+
+    def test_date_narrows_to_single_candidate(self):
+        history = self._history()
+        removed = gmail_fetcher._remove_matching_transaction(
+            history, "smcc", None, 500, "JPY", "2026-11-01")
+        assert removed is True
+        assert [t["id"] for t in history["transactions"]] == ["b"]
+
+    def test_same_date_duplicates_are_left_untouched(self):
+        history = self._history()
+        history["transactions"][1]["date"] = "2026-11-01"
+        removed = gmail_fetcher._remove_matching_transaction(
+            history, "smcc", None, 500, "JPY", "2026-11-01")
+        assert removed is False
+        assert len(history["transactions"]) == 2
+
+    def test_single_candidate_is_removed_even_if_date_differs(self):
+        history = self._history()
+        history["transactions"].pop()
+        removed = gmail_fetcher._remove_matching_transaction(
+            history, "smcc", None, 500, "JPY", "2026-11-12")
+        assert removed is True
+        assert history["transactions"] == []

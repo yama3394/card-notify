@@ -391,7 +391,23 @@ def _make_backup() -> Path:
     return backup
 
 
-def _rollback(backup: Path) -> None:
+def _restore_data(backup_data: Path, data_dir: Path) -> None:
+    """data/ の中身をバックアップの内容に戻す。
+
+    data_dir 自体は削除しない。本番では親（/var/lib）が root 所有で専用ユーザーは
+    data_dir を rmdir できず、消してから copytree する方式だと中身だけ消えて
+    復元が FileExistsError で失敗するため。
+    """
+    data_dir.mkdir(parents=True, exist_ok=True)
+    for item in data_dir.iterdir():
+        if item.is_dir() and not item.is_symlink():
+            shutil.rmtree(item)
+        else:
+            item.unlink()
+    shutil.copytree(backup_data, data_dir, dirs_exist_ok=True)
+
+
+def _rollback(backup: Path, restore_data: bool = True) -> None:
     """バックアップからコードと data/ を復元する。
 
     バックアップ側の code/MANIFEST（旧 O）と現在（更新後）の install 直下の
@@ -438,11 +454,11 @@ def _rollback(backup: Path) -> None:
                 continue
             _copy_file(backup_code / rel, install / rel)
 
+    # data/ はマイグレーションが走った場合だけ戻す。それ以前の失敗で戻すと、
+    # バックアップ取得後に登録された取引（LINE の現金入力等）を巻き戻してしまう。
     backup_data = backup / "data"
-    if backup_data.exists():
-        data_dir = Path(config.DATA_DIR)
-        shutil.rmtree(data_dir, ignore_errors=True)
-        shutil.copytree(backup_data, data_dir)
+    if restore_data and backup_data.exists():
+        _restore_data(backup_data, Path(config.DATA_DIR))
 
 
 def _prune_backups(keep: int = 3, backup_root: Path | None = None) -> None:
@@ -585,6 +601,8 @@ def perform_update() -> int:
     expected_sha = str(manifest.get("sha256") or "").strip()
 
     backup: Path | None = None
+    code_changed = False  # コードの上書きを始めたか（False ならロールバック不要）
+    data_changed = False  # マイグレーションを始めたか（False なら data/ は戻さない）
     tmp_dir = Path(tempfile.mkdtemp(prefix="card-notify-update-"))
     tar_path = tmp_dir / "package.tar.gz"
     extract_dir = tmp_dir / "extract"
@@ -624,12 +642,14 @@ def perform_update() -> int:
         # 5. 展開してコードのみ上書き（破壊的操作の直前）
         code_root = _safe_extract(tar_path, extract_dir)
         logger.warning("コードを上書きします: %s -> %s", code_root, config.INSTALL_DIR)
+        code_changed = True
         _copy_code(code_root, Path(config.INSTALL_DIR))
 
         # 6. 依存更新
         _pip_install()
 
         # 7. マイグレーション
+        data_changed = True
         _run_migrations()
 
         # 8. 再起動
@@ -640,9 +660,12 @@ def perform_update() -> int:
 
     except UpdateError as e:
         logger.error("更新に失敗しました: %s", e)
+        if not code_changed:
+            _notify(f"card-notify 更新失敗（適用前に中止。変更はありません）: {e}")
+            return 1
         if backup is not None:
             try:
-                _rollback(backup)
+                _rollback(backup, restore_data=data_changed)
                 # ロールバック後は元コードでサービスを戻す（失敗しても続行）。
                 try:
                     _restart_service()
@@ -656,9 +679,12 @@ def perform_update() -> int:
         return 1
     except Exception as e:  # noqa: BLE001 - 想定外も安全側でロールバック
         logger.exception("想定外のエラーで更新に失敗しました。")
+        if not code_changed:
+            _notify(f"card-notify 更新失敗（適用前に中止。変更はありません）: {e}")
+            return 1
         if backup is not None:
             try:
-                _rollback(backup)
+                _rollback(backup, restore_data=data_changed)
                 try:
                     _restart_service()
                 except Exception:  # noqa: BLE001
@@ -669,9 +695,15 @@ def perform_update() -> int:
         return 1
     finally:
         _cleanup_temp([tmp_dir])
+        # 古いバックアップ世代の整理は失敗時にも行う。成功時だけだと、更新が
+        # 失敗し続ける間 data/ 丸ごとのコピーが毎日増えてディスクを埋める
+        # （今回の世代は最新なので必ず残る）。
+        try:
+            _prune_backups(keep=3)
+        except Exception:  # noqa: BLE001 - 整理の失敗で結果を変えない
+            logger.exception("古いバックアップの整理に失敗しました。")
 
-    # 10. 成功（古いバックアップ世代を整理してから通知）
-    _prune_backups(keep=3)
+    # 10. 成功
     logger.info("v%s に更新しました。", remote_ver)
     _notify(f"card-notify を v{remote_ver} に更新しました。")
     return 0

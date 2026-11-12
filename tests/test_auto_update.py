@@ -375,3 +375,131 @@ def test_safe_extract_rejects_path_traversal(tmp_path):
     ])
     with _pytest.raises(_au.UpdateError, match="不正なパス"):
         _au._safe_extract(tar_path, tmp_path / "out")
+
+
+# ─────────────────────────────────────────────────────────────
+# data/ の復元（data_dir 自体を削除できない本番構成でも失敗しない）
+# ─────────────────────────────────────────────────────────────
+def _rollback_fixture(tmp_path, monkeypatch):
+    install = tmp_path / "install"
+    data_dir = tmp_path / "varlib" / "card-notify"
+    backup = tmp_path / "backup"
+    monkeypatch.setattr(config, "INSTALL_DIR", install)
+    monkeypatch.setattr(config, "DATA_DIR", data_dir)
+    install.mkdir()
+    data_dir.mkdir(parents=True)
+    (data_dir / "history.json").write_text("after", encoding="utf-8")
+    (data_dir / "added_after_backup.json").write_text("x", encoding="utf-8")
+    (backup / "data" / "sub").mkdir(parents=True)
+    (backup / "data" / "history.json").write_text("before", encoding="utf-8")
+    (backup / "data" / "sub" / "nested.json").write_text("n", encoding="utf-8")
+    return data_dir, backup
+
+
+def test_rollback_restores_data_without_removing_data_dir(tmp_path, monkeypatch):
+    data_dir, backup = _rollback_fixture(tmp_path, monkeypatch)
+
+    # 本番（親が root 所有の /var/lib）では専用ユーザーは data_dir 自体を消せない。
+    # data_dir を消そうとしたら失敗させ、消さずに復元できることを確認する。
+    real_rmtree = auto_update.shutil.rmtree
+
+    def _rmtree(path, *args, **kwargs):
+        assert auto_update.Path(path) != data_dir, "data_dir 自体を削除してはいけない"
+        return real_rmtree(path, *args, **kwargs)
+
+    monkeypatch.setattr(auto_update.shutil, "rmtree", _rmtree)
+
+    auto_update._rollback(backup)
+
+    assert (data_dir / "history.json").read_text(encoding="utf-8") == "before"
+    assert (data_dir / "sub" / "nested.json").read_text(encoding="utf-8") == "n"
+    assert not (data_dir / "added_after_backup.json").exists()
+
+
+def test_rollback_keeps_data_when_restore_data_is_false(tmp_path, monkeypatch):
+    data_dir, backup = _rollback_fixture(tmp_path, monkeypatch)
+
+    auto_update._rollback(backup, restore_data=False)
+
+    assert (data_dir / "history.json").read_text(encoding="utf-8") == "after"
+    assert (data_dir / "added_after_backup.json").exists()
+
+
+def _stub_update_flow(tmp_path, monkeypatch):
+    """perform_update の外部依存（配信元・再起動・通知）を潰し、呼び出しを記録する。"""
+    data_dir, backup = _rollback_fixture(tmp_path, monkeypatch)
+    calls: list = []
+    monkeypatch.setattr(config, "UPDATE_FEED_URL", "https://feed.example")
+    monkeypatch.setattr(config, "UPDATE_PUBKEY", "")
+    monkeypatch.setattr(config, "APP_VERSION", "1.0.0")
+    monkeypatch.setattr(auto_update, "_fetch_manifest",
+                        lambda: {"version": "9.9.9", "url": "x.tar.gz", "sha256": ""})
+    monkeypatch.setattr(auto_update, "_make_backup", lambda: backup)
+    monkeypatch.setattr(auto_update, "_download_tar", lambda url, dest: None)
+    monkeypatch.setattr(auto_update, "_safe_extract", lambda tar, dest: dest)
+    monkeypatch.setattr(auto_update, "_copy_code", lambda src, dest: None)
+    monkeypatch.setattr(auto_update, "_pip_install", lambda: None)
+    monkeypatch.setattr(auto_update, "_run_migrations", lambda: [])
+    monkeypatch.setattr(auto_update, "_healthcheck", lambda: None)
+    monkeypatch.setattr(auto_update, "_restart_service", lambda: calls.append("restart"))
+    monkeypatch.setattr(auto_update, "_notify", lambda text: calls.append(("notify", text)))
+    real_rollback = auto_update._rollback
+
+    def _rollback(b, restore_data=True):
+        calls.append(("rollback", restore_data))
+        real_rollback(b, restore_data=restore_data)
+
+    monkeypatch.setattr(auto_update, "_rollback", _rollback)
+    return data_dir, calls
+
+
+def _raise_update_error(*args, **kwargs):
+    raise auto_update.UpdateError("boom")
+
+
+def test_failure_before_code_change_touches_nothing(tmp_path, monkeypatch):
+    data_dir, calls = _stub_update_flow(tmp_path, monkeypatch)
+    monkeypatch.setattr(auto_update, "_download_tar", _raise_update_error)
+
+    assert auto_update.perform_update() == 1
+
+    # ダウンロード失敗はコードにもデータにも触れる前なので、ロールバックも再起動もしない
+    assert [c for c in calls if c == "restart" or c[0] == "rollback"] == []
+    assert (data_dir / "history.json").read_text(encoding="utf-8") == "after"
+    assert any(c[0] == "notify" and "変更はありません" in c[1] for c in calls)
+
+
+def test_failure_before_migration_rolls_back_code_only(tmp_path, monkeypatch):
+    data_dir, calls = _stub_update_flow(tmp_path, monkeypatch)
+    monkeypatch.setattr(auto_update, "_pip_install", _raise_update_error)
+
+    assert auto_update.perform_update() == 1
+
+    assert ("rollback", False) in calls
+    # バックアップ取得後に登録されたデータを巻き戻さない
+    assert (data_dir / "history.json").read_text(encoding="utf-8") == "after"
+
+
+def test_failure_after_migration_restores_data(tmp_path, monkeypatch):
+    data_dir, calls = _stub_update_flow(tmp_path, monkeypatch)
+    monkeypatch.setattr(auto_update, "_healthcheck", _raise_update_error)
+
+    assert auto_update.perform_update() == 1
+
+    assert ("rollback", True) in calls
+    assert (data_dir / "history.json").read_text(encoding="utf-8") == "before"
+
+
+def test_failed_update_still_prunes_old_backups(tmp_path, monkeypatch):
+    _data_dir, _calls = _stub_update_flow(tmp_path, monkeypatch)
+    backup_root = config.INSTALL_DIR / ".update-backup"
+    for stamp in ("20260101-000000", "20260102-000000", "20260103-000000",
+                  "20260104-000000", "20260105-000000"):
+        (backup_root / stamp).mkdir(parents=True)
+    monkeypatch.setattr(auto_update, "_download_tar", _raise_update_error)
+
+    assert auto_update.perform_update() == 1
+
+    # 失敗が続いてもバックアップ世代は増え続けない（新しい3世代だけ残る）
+    assert sorted(p.name for p in backup_root.iterdir()) == [
+        "20260103-000000", "20260104-000000", "20260105-000000"]

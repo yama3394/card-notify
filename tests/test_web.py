@@ -776,3 +776,83 @@ class TestTransactionEditRawText:
         assert tx["store"] is None
         assert tx["raw_text"] == "raw mail body"
         assert schedule.get_notify_time() == (config.DEFAULT_NOTIFY_HOUR, config.DEFAULT_NOTIFY_MINUTE)
+
+
+class TestDeleteDoesNotResurrect:
+    """WebUI で削除したカード取引が、次回のメール取得で再登録されない。"""
+
+    def _seed(self):
+        def _add(data):
+            data["transactions"].extend([
+                {"id": "msgA", "date": "2026-01-10", "amount": 100, "type": "smcc", "store": "A", "currency": "JPY"},
+                {"id": "msgB", "date": "2026-01-10", "amount": 200, "type": "jcb", "store": "B1", "currency": "JPY"},
+                {"id": "msgB#2", "date": "2026-01-10", "amount": 300, "type": "jcb", "store": "B2", "currency": "JPY"},
+                {"id": "cash-uuid", "date": "2026-01-10", "amount": 400, "type": "cash", "store": None},
+            ])
+
+        storage.update_history(_add)
+
+    @pytest.mark.parametrize("path", ["/transaction/delete", "/errors/delete", "/cash/delete"])
+    def test_card_delete_records_message_id(self, configured_app, path):
+        self._seed()
+        client = configured_app.test_client()
+        token = _login_session(client)
+
+        assert client.post(path, data={"csrf_token": token, "id": "msgA"}).status_code == 200
+
+        history = storage.load_history()
+        assert "msgA" not in [t["id"] for t in history["transactions"]]
+        # gmail_fetcher は transactions と skipped_ids にある id を処理済みとみなす
+        assert "msgA" in history["skipped_ids"]
+
+    def test_second_transaction_of_mail_records_base_message_id(self, configured_app):
+        self._seed()
+        client = configured_app.test_client()
+        token = _login_session(client)
+
+        client.post("/transaction/delete", data={"csrf_token": token, "id": "msgB#2"})
+        client.post("/transaction/delete", data={"csrf_token": token, "id": "msgB"})
+
+        history = storage.load_history()
+        assert [t["id"] for t in history["transactions"]] == ["msgA", "cash-uuid"]
+        assert history["skipped_ids"] == ["msgB"]
+
+    def test_cash_delete_does_not_touch_skipped_ids(self, configured_app):
+        self._seed()
+        client = configured_app.test_client()
+        token = _login_session(client)
+
+        client.post("/cash/delete", data={"csrf_token": token, "id": "cash-uuid"})
+
+        history = storage.load_history()
+        assert "cash-uuid" not in [t["id"] for t in history["transactions"]]
+        assert history["skipped_ids"] == []
+
+
+class TestSkippedRegisterIsIdempotent:
+    """/errors/skipped/register の二重送信で同じ id の取引を重複させない。"""
+
+    _FORM = {"id": "m1", "type": "smcc", "amount": "1500", "store": "セブン", "date": "2026-07-01"}
+
+    def test_double_submit_registers_once(self, configured_app):
+        def _seed(data):
+            data["skipped"] = [
+                {"id": "m1", "type": "smcc", "date": "2026-07-01", "subject": "A", "reason": "no_amount"},
+            ]
+
+        storage.update_history(_seed)
+        client = configured_app.test_client()
+        form = {"csrf_token": _login_session(client), **self._FORM}
+
+        assert client.post("/errors/skipped/register", data=form).status_code == 200
+        assert client.post("/errors/skipped/register", data=form).status_code == 409
+
+        assert [t["id"] for t in storage.load_history()["transactions"]] == ["m1"]
+
+    def test_unknown_id_is_rejected(self, configured_app):
+        client = configured_app.test_client()
+        form = {"csrf_token": _login_session(client), **self._FORM}
+
+        assert client.post("/errors/skipped/register", data=form).status_code == 409
+
+        assert storage.load_history()["transactions"] == []

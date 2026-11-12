@@ -6,10 +6,11 @@ import uuid
 from datetime import date, timedelta
 
 import late_arrivals
+import notifier
 import parsers
 import reports
 import state as _state
-from analyzer import analyze_week, today_jst
+from analyzer import analyze_week, is_jpy, today_jst
 from storage import load_history, update_history
 
 logger = logging.getLogger(__name__)
@@ -103,8 +104,11 @@ def _list_today() -> str:
         store = f" {t['store']}" if t.get("store") else ""
         # ID は LINE から取り消せる現金にだけ出す（カードの ID は WebUI のみ）
         no = f" (#{t['no']})" if t.get("type") == "cash" and t.get("no") else ""
-        lines.append(f"  {label}{store}  ¥{t['amount']:,}{no}")
-        total += t["amount"]
+        # 外貨は通貨コード付きで表示し、円の合計には混ぜない（日次通知と同じ扱い）
+        amount = notifier._fmt_amount(t["amount"], t.get("currency", "JPY"))
+        lines.append(f"  {label}{store}  {amount}{no}")
+        if is_jpy(t):
+            total += t["amount"]
     lines.append(f"合計  ¥{total:,}")
     return "\n".join(lines)
 

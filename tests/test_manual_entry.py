@@ -170,3 +170,19 @@ class TestLateArrival:
         assert len(late) == 2
         assert late[0]["store"] == "既存"
         assert late[1]["store"] == "スーパー"
+
+
+class TestListTodayForeign:
+    def test_foreign_amount_is_not_shown_or_summed_as_yen(self, monkeypatch):
+        store = _patch_storage(monkeypatch)
+        today = FIXED_TODAY.strftime("%Y-%m-%d")
+        store["transactions"].extend([
+            {"id": "j", "date": today, "amount": 1200, "type": "smcc", "store": "TESTSHOP", "currency": "JPY"},
+            {"id": "k", "date": today, "amount": 10950.5, "type": "smcc", "store": "SEOUL", "currency": "KRW"},
+        ])
+
+        reply = process("今日")
+
+        assert "SEOUL  10,950.50 KRW" in reply
+        assert "¥10,950" not in reply
+        assert reply.splitlines()[-1] == "合計  ¥1,200"
