@@ -488,3 +488,18 @@ def test_failure_after_migration_restores_data(tmp_path, monkeypatch):
 
     assert ("rollback", True) in calls
     assert (data_dir / "history.json").read_text(encoding="utf-8") == "before"
+
+
+def test_failed_update_still_prunes_old_backups(tmp_path, monkeypatch):
+    _data_dir, _calls = _stub_update_flow(tmp_path, monkeypatch)
+    backup_root = config.INSTALL_DIR / ".update-backup"
+    for stamp in ("20260101-000000", "20260102-000000", "20260103-000000",
+                  "20260104-000000", "20260105-000000"):
+        (backup_root / stamp).mkdir(parents=True)
+    monkeypatch.setattr(auto_update, "_download_tar", _raise_update_error)
+
+    assert auto_update.perform_update() == 1
+
+    # 失敗が続いてもバックアップ世代は増え続けない（新しい3世代だけ残る）
+    assert sorted(p.name for p in backup_root.iterdir()) == [
+        "20260103-000000", "20260104-000000", "20260105-000000"]

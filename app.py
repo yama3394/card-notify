@@ -818,11 +818,21 @@ def errors_skipped_register():
         "currency": "JPY",
     }
 
+    captured: dict = {}
+
     def _register(data):
+        # 一覧に残っているメールだけ登録できる。二重送信（ボタン連打・再送）や
+        # 無視済みのメールで同じ id の取引が重複して作られるのを防ぐ。
+        if not any(s.get("id") == skip_id for s in data.get("skipped", [])) \
+                or any(t.get("id") == skip_id for t in data["transactions"]):
+            captured["error"] = True
+            return
         data.setdefault("transactions", []).append(new_tx)
         data["skipped"] = [s for s in data.get("skipped", []) if s.get("id") != skip_id]
 
     storage.update_history(_register)
+    if "error" in captured:
+        return '<p style="color:red">⚠️ 登録済み、または対象のメールが見つかりません</p>', 409
     return '<p style="color:green">✅ 登録しました</p>'
 
 

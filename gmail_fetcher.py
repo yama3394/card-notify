@@ -100,17 +100,28 @@ def _remove_matching_transaction(history, card_type, store, amount, currency="JP
         i for i, t in enumerate(txns)
         if t["type"] == card_type and t["amount"] == amount and _cur(t) == currency
     ]
-    by_store = [i for i in base if norm_store is None or _normalize_store(txns[i].get("store")) == norm_store]
-    by_date = [i for i in by_store if date is None or txns[i].get("date") == date]
-
-    if by_date:
-        idx = by_date[-1]
-    elif by_store:
-        idx = by_store[-1]
-    elif len(base) == 1:
-        idx = base[0]
+    if norm_store is not None:
+        by_store = [i for i in base if _normalize_store(txns[i].get("store")) == norm_store]
+        by_date = [i for i in by_store if date is None or txns[i].get("date") == date]
+        if by_date:
+            idx = by_date[-1]
+        elif by_store:
+            idx = by_store[-1]
+        elif len(base) == 1:
+            idx = base[0]
+        else:
+            return False
     else:
-        return False
+        # 取消メールから店舗名が取れなかった場合、店舗では絞り込めない。同額の
+        # 候補が複数あるときに「最後の1件」を消すと無関係な取引を消しかねない
+        # ので、日付で1件に定まる場合か、候補がそもそも1件の場合だけ削除する。
+        by_date = [i for i in base if date is not None and txns[i].get("date") == date]
+        if len(by_date) == 1:
+            idx = by_date[0]
+        elif len(base) == 1:
+            idx = base[0]
+        else:
+            return False
 
     removed = txns.pop(idx)
     history.setdefault("skipped_ids", []).append(removed["id"])

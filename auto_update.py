@@ -695,9 +695,15 @@ def perform_update() -> int:
         return 1
     finally:
         _cleanup_temp([tmp_dir])
+        # 古いバックアップ世代の整理は失敗時にも行う。成功時だけだと、更新が
+        # 失敗し続ける間 data/ 丸ごとのコピーが毎日増えてディスクを埋める
+        # （今回の世代は最新なので必ず残る）。
+        try:
+            _prune_backups(keep=3)
+        except Exception:  # noqa: BLE001 - 整理の失敗で結果を変えない
+            logger.exception("古いバックアップの整理に失敗しました。")
 
-    # 10. 成功（古いバックアップ世代を整理してから通知）
-    _prune_backups(keep=3)
+    # 10. 成功
     logger.info("v%s に更新しました。", remote_ver)
     _notify(f"card-notify を v{remote_ver} に更新しました。")
     return 0

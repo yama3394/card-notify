@@ -48,39 +48,28 @@ mkdir -p "$DIST_DIR"
 # ── MANIFEST 生成（tar に含める配布ファイルの相対パス一覧。auto_update.py が
 #    「配布物としてどのファイルを置換/削除してよいか」を判定するのに使う
 #    （利用者が追加した parsers/mycard.py 等の独自ファイルを更新で消さないため）。
-#    除外パターンは tar 作成と同一にする。MANIFEST は生成物だが tar に同梱する
+#    tar はこの MANIFEST から作る。MANIFEST は生成物だが tar に同梱する
 #    配布物なので .gitignore には追加しない。） ──
 log "MANIFEST を生成"
+# 配布物は git の追跡ファイルだけに限る。作業ツリーを丸ごと tar にすると、
+# リポジトリ直下に置いた token.json / credentials.json / *.env / ログ等の
+# 未追跡ファイル（.gitignore 済みの機密を含む）まで配布物に入ってしまう。
+git -C "$REPO_DIR" rev-parse --is-inside-work-tree >/dev/null 2>&1 || {
+  echo "エラー: git リポジトリ内で実行してください（配布物は git の追跡ファイルから作ります）" >&2
+  exit 1
+}
 {
-  find . \
-    \( -path './.git' -o -path './dist' -o -path './data' -o -path './.update-backup' \
-       -o -path './.venv' -o -path './venv' \) -prune \
-    -o -type f \
-    ! -name '*.pyc' \
-    ! -path '*/__pycache__/*' \
-    ! -path '*/.pytest_cache/*' \
-    ! -path './.env' \
-    ! -name 'MANIFEST' \
-    ! -name 'MANIFEST.tmp' \
-    -print
-  echo './MANIFEST'
-} | sed 's|^\./||' | sort > MANIFEST.tmp
+  # 追跡中でも作業ツリーから削除済みのファイルは除く（tar が失敗するため）
+  git ls-files | while IFS= read -r f; do
+    [[ -f "$f" ]] && printf '%s\n' "$f"
+  done
+  echo 'MANIFEST'
+} | LC_ALL=C sort -u > MANIFEST.tmp
 mv MANIFEST.tmp MANIFEST
 
-# ── tar 作成（配布に不要なものは除外。tests は含める。MANIFEST も同梱） ──
+# ── tar 作成（MANIFEST に載るファイルだけを同梱。tests も含む） ──
 log "アーカイブを作成: dist/${TARBALL}"
-tar \
-  --exclude='./.env' \
-  --exclude='./data' \
-  --exclude='./.git' \
-  --exclude='./dist' \
-  --exclude='.update-backup' \
-  --exclude='__pycache__' \
-  --exclude='.pytest_cache' \
-  --exclude='*.pyc' \
-  --exclude='./.venv' \
-  --exclude='./venv' \
-  -czf "${DIST_DIR}/${TARBALL}" -C "$REPO_DIR" .
+tar -czf "${DIST_DIR}/${TARBALL}" -C "$REPO_DIR" -T MANIFEST
 
 # ── sha256 計算 ──
 if command -v sha256sum >/dev/null 2>&1; then

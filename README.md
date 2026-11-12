@@ -249,7 +249,7 @@ sha256 は tar と同じ配信元の `version.json` 由来のため、配信元�
 # 2) tar・version.json・紹介サイト・install.sh を生成し R2 へアップロード
 R2_REMOTE=r2:<bucket> ./release.sh
 ```
-`release.sh` は `card-notify-<VERSION>.tar.gz`（`.env`/`data/` を除外）・
+`release.sh` は `card-notify-<VERSION>.tar.gz`（git の追跡ファイルのみ同梱）・
 `version.json`（version・ファイル名・SHA256）・`index.html`（紹介サイト）・
 `install.sh` を作り、`rclone copy` で配信元へ送る。各インストールの自動アップデートが
 `version.json` を検知して更新する。

@@ -560,3 +560,48 @@ class TestUnparseableMailIsIsolated:
         assert count == 0
         assert history["transactions"] == []
         assert [s["id"] for s in history["skipped"]] == ["m1"]
+
+
+class TestCancellationWithoutStore:
+    """取消メールから店舗名が取れなかった場合、候補が1件に定まるときだけ削除する。"""
+
+    @staticmethod
+    def _history():
+        return {
+            "transactions": [
+                {"id": "a", "date": "2026-11-01", "amount": 500, "type": "smcc", "store": "A", "currency": "JPY"},
+                {"id": "b", "date": "2026-11-05", "amount": 500, "type": "smcc", "store": "B", "currency": "JPY"},
+            ],
+            "skipped_ids": [],
+        }
+
+    def test_ambiguous_candidates_are_left_untouched(self):
+        history = self._history()
+        removed = gmail_fetcher._remove_matching_transaction(
+            history, "smcc", None, 500, "JPY", "2026-11-12")
+        assert removed is False
+        assert [t["id"] for t in history["transactions"]] == ["a", "b"]
+        assert history["skipped_ids"] == []
+
+    def test_date_narrows_to_single_candidate(self):
+        history = self._history()
+        removed = gmail_fetcher._remove_matching_transaction(
+            history, "smcc", None, 500, "JPY", "2026-11-01")
+        assert removed is True
+        assert [t["id"] for t in history["transactions"]] == ["b"]
+
+    def test_same_date_duplicates_are_left_untouched(self):
+        history = self._history()
+        history["transactions"][1]["date"] = "2026-11-01"
+        removed = gmail_fetcher._remove_matching_transaction(
+            history, "smcc", None, 500, "JPY", "2026-11-01")
+        assert removed is False
+        assert len(history["transactions"]) == 2
+
+    def test_single_candidate_is_removed_even_if_date_differs(self):
+        history = self._history()
+        history["transactions"].pop()
+        removed = gmail_fetcher._remove_matching_transaction(
+            history, "smcc", None, 500, "JPY", "2026-11-12")
+        assert removed is True
+        assert history["transactions"] == []

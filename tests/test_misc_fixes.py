@@ -128,3 +128,53 @@ class TestReloadPrecedence:
 
         config.reload()
         assert config.SITE_URL == "https://from-file.example.com"
+
+
+class TestHistoryAtomicWrite:
+    """history.json は一時ファイル→os.replace で書く（途中失敗で全履歴を壊さない）。"""
+
+    @pytest.fixture
+    def history_file(self, tmp_path, monkeypatch):
+        import storage
+
+        path = tmp_path / "history.json"
+        monkeypatch.setattr(config, "HISTORY_FILE", path)
+        storage.update_history(lambda d: d["transactions"].append(
+            {"id": "t1", "date": "2026-01-01", "amount": 100, "type": "cash", "store": None}))
+        return path
+
+    def test_failed_write_keeps_previous_content(self, history_file):
+        import storage
+
+        before = history_file.read_text(encoding="utf-8")
+
+        def _break(data):
+            data["transactions"].append({"id": "t2", "amount": object()})  # JSON 化できない
+
+        with pytest.raises(TypeError):
+            storage.update_history(_break)
+
+        assert history_file.read_text(encoding="utf-8") == before
+        assert [t["id"] for t in storage.load_history()["transactions"]] == ["t1"]
+        assert not history_file.with_name("history.json.tmp").exists()
+
+    def test_file_is_owner_only(self, history_file):
+        assert os.stat(history_file).st_mode & 0o777 == 0o600
+
+    def test_concurrent_updates_are_not_lost(self, history_file):
+        import storage
+
+        def _worker(n):
+            for i in range(20):
+                storage.update_history(lambda d, n=n, i=i: d["transactions"].append(
+                    {"id": f"w{n}-{i}", "date": "2026-01-01", "amount": 1, "type": "cash", "store": None}))
+
+        threads = [threading.Thread(target=_worker, args=(n,)) for n in range(8)]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join()
+
+        txs = storage.load_history()["transactions"]
+        assert len(txs) == 1 + 8 * 20
+        assert len({t["no"] for t in txs}) == len(txs)

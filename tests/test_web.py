@@ -827,3 +827,32 @@ class TestDeleteDoesNotResurrect:
         history = storage.load_history()
         assert "cash-uuid" not in [t["id"] for t in history["transactions"]]
         assert history["skipped_ids"] == []
+
+
+class TestSkippedRegisterIsIdempotent:
+    """/errors/skipped/register の二重送信で同じ id の取引を重複させない。"""
+
+    _FORM = {"id": "m1", "type": "smcc", "amount": "1500", "store": "セブン", "date": "2026-07-01"}
+
+    def test_double_submit_registers_once(self, configured_app):
+        def _seed(data):
+            data["skipped"] = [
+                {"id": "m1", "type": "smcc", "date": "2026-07-01", "subject": "A", "reason": "no_amount"},
+            ]
+
+        storage.update_history(_seed)
+        client = configured_app.test_client()
+        form = {"csrf_token": _login_session(client), **self._FORM}
+
+        assert client.post("/errors/skipped/register", data=form).status_code == 200
+        assert client.post("/errors/skipped/register", data=form).status_code == 409
+
+        assert [t["id"] for t in storage.load_history()["transactions"]] == ["m1"]
+
+    def test_unknown_id_is_rejected(self, configured_app):
+        client = configured_app.test_client()
+        form = {"csrf_token": _login_session(client), **self._FORM}
+
+        assert client.post("/errors/skipped/register", data=form).status_code == 409
+
+        assert storage.load_history()["transactions"] == []

@@ -197,7 +197,9 @@ log "systemd ユニットを設置: ${UNIT_DIR}"
 install_unit() {
   local src="$1" dst="$2"
   [[ -f "$src" ]] || die "ユニットが見つかりません: $src"
-  sed "s/REPLACE_WITH_SERVICE_USER/${SERVICE_USER}/g" "$src" > "${UNIT_DIR}/${dst}"
+  # ユニット内の設置先（/opt/card-notify）も INSTALL_DIR に合わせて置換する
+  sed -e "s/REPLACE_WITH_SERVICE_USER/${SERVICE_USER}/g" \
+      -e "s|/opt/card-notify|${INSTALL_DIR}|g" "$src" > "${UNIT_DIR}/${dst}"
 }
 install_unit "${INSTALL_DIR}/deploy/card-notify.service"        "card-notify.service"
 install_unit "${INSTALL_DIR}/deploy/card-notify-update.service" "card-notify-update.service"
@@ -225,7 +227,10 @@ log "daemon-reload"
 systemctl daemon-reload
 
 log "本体サービスを有効化・起動: card-notify"
-systemctl enable --now card-notify.service || warn "card-notify の起動に失敗。journalctl -u card-notify で確認してください"
+# 再インストール時は稼働中の旧コードを新コードへ切り替えるため、起動ではなく再起動する
+# （restart は停止中なら起動する）。
+systemctl enable card-notify.service || warn "card-notify の有効化に失敗しました"
+systemctl restart card-notify.service || warn "card-notify の起動に失敗。journalctl -u card-notify で確認してください"
 
 log "更新タイマーを有効化・起動: card-notify-update.timer"
 systemctl enable --now card-notify-update.timer || warn "更新タイマーの起動に失敗。journalctl -u card-notify-update で確認してください"
