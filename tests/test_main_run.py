@@ -283,3 +283,40 @@ class TestStatePermissions:
         _fix_today(monkeypatch, 2026, 7, 8)
         assert main.run() is True
         assert _perm_bits(config.STATE_FILE) == 0o600
+
+
+class TestErrorNotifyOncePerDay:
+    """再試行のたびに同じ失敗通知を送らない（種類ごとに1日1回）。"""
+
+    def test_analyze_failure_notified_once_and_again_next_day(self, calls, monkeypatch):
+        _fix_today(monkeypatch, 2026, 8, 5)
+        monkeypatch.setattr(analyzer, "analyze", _raise)
+
+        for _ in range(3):
+            assert main.run() is False
+        assert calls["errors"] == ["集計失敗: boom"]
+
+        _fix_today(monkeypatch, 2026, 8, 6)
+        assert main.run() is False
+        assert len(calls["errors"]) == 2
+
+    def test_daily_send_failure_notified_once(self, calls, monkeypatch):
+        _fix_today(monkeypatch, 2026, 8, 5)
+        monkeypatch.setattr(notifier, "send_daily_report", _raise)
+
+        for _ in range(3):
+            assert main.run() is False
+        assert calls["errors"] == ["日次通知失敗: boom"]
+
+    def test_monthly_and_weekly_failures_are_suppressed_independently(self, calls, monkeypatch):
+        _fix_today(monkeypatch, 2026, 6, 1)  # 月初かつ月曜
+        _state.update(lambda s: s.update(last_monthly="2026-04", last_weekly="2026-05-18"))
+        monkeypatch.setattr(reports, "send_monthly_report", _raise)
+        monkeypatch.setattr(reports, "send_weekly_report", _raise)
+
+        for _ in range(3):
+            assert main.run() is False
+
+        # 種類が違えばそれぞれ1回ずつ届く（片方の抑制でもう片方を黙らせない）
+        assert calls["errors"] == ["月次レポート失敗: boom", "週次レポート失敗: boom"]
+        assert len(calls["daily"]) == 1
